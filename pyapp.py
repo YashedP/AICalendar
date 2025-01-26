@@ -1,20 +1,33 @@
-import asyncio
-import os
+import datetime
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from notion_client import Client as NotionClient
 from openai import OpenAI
+import os
 from pydantic import BaseModel
 from PySide6 import QtCore, QtWidgets, QtGui
-from pystray import Icon, Menu, MenuItem
-from PIL import Image, ImageDraw
 from PySide6 import QtCore, QtWidgets, QtGui
 import sys
 
-LIGHT_MODE_KEY = "light_mode"
+LIGHT_MODE_KEY = "light_mode"   
 CHATGPT_KEY = "chatgpt_key"
 GOOGLE_AUTH = "google_auth"
+NOTION_TOKEN = "notion_token"
+
+# "https://www.notion.so/Ultimate-Tasks-Manager-bfbf17347efa413c9ea5ec315b28145a?pvs=4"
 
 settings = QtCore.QSettings("Yash", "AICalendar")
 
-client = OpenAI(api_key=settings.value(CHATGPT_KEY, "", type=str))
+chatgpt_client = OpenAI(api_key=settings.value(CHATGPT_KEY, "", type=str))
+
+notion_key = settings.value(NOTION_TOKEN, "", type=str)
+if notion_key:
+    notion_client = NotionClient(auth=notion_key)
+else:
+    notion_client = None
 
 #TODO: Create an event and have it be returned from ChatGPT and then posted into google calendar
 class Event(BaseModel):
@@ -57,16 +70,25 @@ class SettingsWindow(QtWidgets.QWidget):
         self.dark_mode_radio.setChecked(not light_mode)
         layout.addWidget(self.dark_mode_radio)
         
-        self.text_input = PlainTextEdit(self)
+        self.chatgpt_key_input = PlainTextEdit(self)
         
         # Check if ChatGPT key is stored
         if settings.value(CHATGPT_KEY, "", type=str):
-            self.text_input.setPlainText(settings.value(CHATGPT_KEY, "", type=str))
+            self.chatgpt_key_input.setPlainText(settings.value(CHATGPT_KEY, "", type=str))
         elif settings.value(CHATGPT_KEY, "", type=str) == "":
-            self.text_input.setPlaceholderText("Enter ChatGPT key here...")
-            
-            
-        layout.addWidget(self.text_input)
+            self.chatgpt_key_input.setPlaceholderText("Enter ChatGPT key here...")
+                        
+        layout.addWidget(self.chatgpt_key_input)
+
+        self.notion_token_input = PlainTextEdit(self)
+
+        # Check if Notion token is stored
+        if settings.value(NOTION_TOKEN, "", type=str):
+            self.notion_token_input.setPlainText(settings.value(NOTION_TOKEN, "", type=str))
+        elif settings.value(NOTION_TOKEN, "", type=str) == "":
+            self.notion_token_input.setPlaceholderText("Enter Notion token here...")
+                        
+        layout.addWidget(self.notion_token_input)
 
         self.google_auth = QtWidgets.QPushButton("Select Google Auth File")
         self.google_auth.clicked.connect(self.select_google_auth)
@@ -80,6 +102,7 @@ class SettingsWindow(QtWidgets.QWidget):
         if self.google_auth_file:
             self.google_auth_label.setText(f"Google Auth File: {self.google_auth_file}")
     
+
         # Save button
         save_button = QtWidgets.QPushButton("Save")
         save_button.clicked.connect(self.apply_settings)
@@ -99,6 +122,14 @@ class SettingsWindow(QtWidgets.QWidget):
             self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
             settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
         
+        if self.chatgpt_key_input:
+            settings.setValue(CHATGPT_KEY, self.chatgpt_key_input.toPlainText())
+            update_api_key()
+
+        if self.notion_token_input:
+            settings.setValue(NOTION_TOKEN, self.notion_token_input.toPlainText())
+            notion_key()
+
         if self.google_auth_file:
             settings.setValue(GOOGLE_AUTH, self.google_auth_label.text().split(": ")[1])
         
@@ -200,7 +231,10 @@ def apply_initial_theme(QWindow, light_mode):
         QWindow.setStyleSheet(dark_style)  # Dark mode for settings window
 
 def update_api_key():
-    client.api_key = settings.value(CHATGPT_KEY, "", type=str)
+    chatgpt_client.api_key = settings.value(CHATGPT_KEY, "", type=str)
+
+def notion_key():
+    notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
 
 def resource_path(relative_path):
     """Get the absolute path to the resource, works for development and PyInstaller builds."""
@@ -208,8 +242,100 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.abspath(relative_path)
 
+def notion():
+    my_page = notion_client.databases.query(
+        **{
+            "database_id": "6728f8a2330a4092860d6d358a4c33f3",
+            "filter": {
+                "and": [
+                    {
+                        "property": "Done",
+                        "checkbox": {
+                            "equals": False,
+                        },
+                    },
+                    {
+                        "property": "Schedulable",
+                        "checkbox": {
+                            "equals": True,
+                        },
+                    }
+                ]
+            }
+        }
+    )
+
+    results = my_page["results"]
+
+    tasks = []
+    for i in range(len(results)):
+        title = results[i]['properties']['Title']['title'][0]['plain_text']
+        priority = results[i]['properties']['Priority']['select']['name']
+        tasks.append([title, priority])
+
+    # Sort tasks by priority in descending order
+    tasks.sort(key=lambda x: x[1], reverse=True)
+
+    print(tasks)
+
+def google_calendar():
+    SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+    creds = None
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json")
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+
+            print("string: " + settings.value(GOOGLE_AUTH, "", type=str))
+            flow = InstalledAppFlow.from_client_secrets_file(
+                settings.value(GOOGLE_AUTH, "", type=str), SCOPES
+            )
+            creds = flow.run_local_server(port=0)
+        with open("token.json", "w") as token:
+            token.write(creds.to_json())
+
+    try:
+        service = build("calendar", "v3", credentials=creds)
+        
+        for v in service.calendarList().list().execute()["items"]["summary"]:
+            print(f"{v}")
+
+        print()
+        # Call the Calendar API
+        # now = datetime.datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
+
+        # events_result = (
+        #     service.events()
+        #     .list(
+        #         calendarId="primary",
+        #         timeMin=now,
+        #         maxResults=10,
+        #         singleEvents=True,
+        #         orderBy="startTime",
+        #     )
+        #     .execute()
+        # )
+        # events = events_result.get("items", [])
+
+        # if not events:
+        #     print("No upcoming events found.")
+
+        # # Prints the start and name of the next 10 events
+        # for event in events:
+        #     start = event["start"].get("dateTime", event["start"].get("date"))
+        #     print(start, event["summary"])
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+    
+
 # Entry point for the application
 if __name__ == "__main__":
+    # notion()
+    google_calendar()
+
     app = QtWidgets.QApplication(sys.argv)
     icon = QtGui.QIcon(resource_path("AICalendar.png"))
     app.setWindowIcon(icon)
