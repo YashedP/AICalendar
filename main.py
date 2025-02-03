@@ -270,7 +270,12 @@ def notion():
     tasks = []
     for i in range(len(results)):
         title = results[i]['properties']['Title']['title'][0]['plain_text']
-        priority = results[i]['properties']['Priority']['select']['name']
+        priority = results[i]['properties']['Priority']['select']
+        if priority == None:
+            priority = "0"
+        else:
+            priority = priority['name']
+            
         tasks.append([title, priority])
 
     # Sort tasks by priority in descending order
@@ -300,10 +305,9 @@ def google_calendar():
     try:
         service = build("calendar", "v3", credentials=creds)
         
-        for v in service.calendarList().list().execute()["items"]["summary"]:
-            print(f"{v}")
+        for v in service.calendarList().list().execute()['items']:
+            print(f"{v['summary']}")
 
-        print()
         # Call the Calendar API
         # now = datetime.datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
 
@@ -333,7 +337,7 @@ def google_calendar():
 
 # Entry point for the application
 if __name__ == "__main__":
-    # notion()
+    notion()
     google_calendar()
 
     app = QtWidgets.QApplication(sys.argv)
