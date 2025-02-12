@@ -4,14 +4,13 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from notion_client import Client as NotionClient
 from google import genai
+from notion_client import Client as NotionClient
 import os
 from pydantic import BaseModel
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6 import QtCore, QtWidgets, QtGui
 import sys
-from datetime import datetime
 
 LIGHT_MODE_KEY = "light_mode"
 GEMINI_KEY = "gemini_key"
@@ -20,17 +19,20 @@ NOTION_TOKEN = "notion_token"
 
 # "https://www.notion.so/Ultimate-Tasks-Manager-bfbf17347efa413c9ea5ec315b28145a?pvs=4"
 
+# Qt decides where to store the settings based on the OS
 settings = QtCore.QSettings("Yash", "AICalendar")
 
-gemini_client = genai.Client(api_key=settings.value(GEMINI_KEY, "", type=str))
+if settings.value(GEMINI_KEY, "", type=str):
+    gemini_client = genai.Client(api_key=settings.value(GEMINI_KEY, "", type=str))
+else:
+    gemini_client = None
 
-notion_key = settings.value(NOTION_TOKEN, "", type=str)
-if notion_key:
-    notion_client = NotionClient(auth=notion_key)
+# Check if notion key is stored, if so create a notion client
+if settings.value(NOTION_TOKEN, "", type=str):
+    notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
 else:
     notion_client = None
 
-#TODO: Create an event and have it be returned from Gemini and then posted into google calendar
 class Event(BaseModel):
     title: str
     time_to_complete: int
@@ -39,6 +41,7 @@ class Event(BaseModel):
     day: int
     month: int
 
+# Overwrites the default text formatting so that the text is not formatted when pasted
 class PlainTextEdit(QtWidgets.QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,6 +52,7 @@ class PlainTextEdit(QtWidgets.QTextEdit):
         else:
             super().insertFromMimeData(source)
 
+# Settings window class
 class SettingsWindow(QtWidgets.QWidget):
     def __init__(self, main_widget):
         super().__init__()
@@ -56,15 +60,16 @@ class SettingsWindow(QtWidgets.QWidget):
         self.setWindowTitle("Settings")
         self.resize(400, 300)
         
+        # Load settings
         self.settings = settings
         light_mode = settings.value(LIGHT_MODE_KEY, True, type=bool)
         
+        # Layout for settings window
         layout = QtWidgets.QVBoxLayout(self)
 
         mode_label = QtWidgets.QLabel("Select Theme:")
         layout.addWidget(mode_label)
         
-        # Layout for settings window
         self.light_mode_radio = QtWidgets.QRadioButton("Light Mode")
         self.light_mode_radio.setChecked(light_mode)
         layout.addWidget(self.light_mode_radio)
@@ -113,6 +118,7 @@ class SettingsWindow(QtWidgets.QWidget):
 
         apply_initial_theme(self, light_mode)
 
+    # Applies Settings
     def apply_settings(self):
         """Apply the selected settings."""
         if self.light_mode_radio.isChecked():
@@ -136,9 +142,10 @@ class SettingsWindow(QtWidgets.QWidget):
         if self.google_auth_file:
             settings.setValue(GOOGLE_AUTH, self.google_auth_label.text().split(": ")[1])
         
-        # Set OpenAI API key
-        update_api_key()
+        # Set Gemini API key
+        update_gemini_api_key()
         
+    # Select Google Auth File
     def select_google_auth(self):
         """Open file dialog to select a .tex file."""
         file_filter = "Json file (*.json)"
@@ -147,11 +154,12 @@ class SettingsWindow(QtWidgets.QWidget):
             self.google_auth_file = file_path
             self.google_auth_label.setText(f"Google Auth File: {file_path}")
 
-# Main application class
+# Tray window class
 class TrayApp(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        # Set the icon of the tray application to the calendar icon
         self.setIcon(QtGui.QIcon(resource_path("AICalendar.png")))
         # Create the menu
         menu = QtWidgets.QMenu()
@@ -160,6 +168,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         open_action = menu.addAction("Open")
         open_action.triggered.connect(self.show_window)
 
+        # Add Regenerate Day option
         regenerate_day = menu.addAction("Regenerate Day")
         regenerate_day.triggered.connect(self.regenerate_day)
 
@@ -172,12 +181,15 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         # Create the main window
         self.window = MainWindow()
 
+    # Show the main window upon clicking "Open"
     def show_window(self):
         self.window.show()
 
+    # Exit the application upon clicking "Exit"
     def exit_app(self):
         QtWidgets.QApplication.quit()
         
+    # Regenerate the day
     def regenerate_day(self):
         print("Regenerating Day...")
 
@@ -186,7 +198,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         
-        #Load Settings
+        # Load Settings
         self.settings = settings
         light_mode = settings.value(LIGHT_MODE_KEY, True, type=bool)
         
@@ -214,30 +226,40 @@ class MainWindow(QtWidgets.QMainWindow):
 
         apply_initial_theme(self, light_mode)
 
+    # Open the settings window
     @QtCore.Slot()
     def open_settings(self):
         """Open a new settings window."""
         self.settings_window = SettingsWindow(self)  # Pass main widget to settings
         self.settings_window.show()
 
+    # Retrieve tasks from the database and schedule them
     def fetch_and_schedule(self):
         print("Tasks fetched and scheduled!")
         
-    def closeEvent(self, event):
-        event.ignore()
-        self.hide()
-
+# Apply the initial theme based on the light mode preference, referenced by all windows
 def apply_initial_theme(QWindow, light_mode):
     """Apply the initial theme based on the light mode preference."""
     if not light_mode:
         dark_style = "background-color: #2e2e2e; color: white;"
         QWindow.setStyleSheet(dark_style)  # Dark mode for settings window
 
-def update_api_key():
-    gemini_client.api_key = settings.value(GEMINI_KEY, "", type=str)
+# Update the API key for Gemini
+def update_gemini_api_key():
+    gemini_key = settings.value(GEMINI_KEY, "", type=str)
+    if gemini_key:
+        gemini_client = genai.Client(api_key=gemini_key)
+    else:
+        gemini_client = None
 
+
+# Update the API key for Notion
 def notion_key():
-    notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
+    notion_key = settings.value(GEMINI_KEY, "", type=str)
+    if notion_key:
+        notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
+    else:
+        notion_client = None
 
 def resource_path(relative_path):
     """Get the absolute path to the resource, works for development and PyInstaller builds."""
@@ -246,6 +268,7 @@ def resource_path(relative_path):
     return os.path.abspath(relative_path)
 
 def get_tasks():
+    # Get all tasks that are not done and are schedulable
     my_page = notion_client.databases.query(
         **{
             "database_id": "6728f8a2330a4092860d6d358a4c33f3",
@@ -270,15 +293,19 @@ def get_tasks():
 
     results = my_page["results"]
 
+    # Extract the title and priority of each task
     tasks = []
     for i in range(len(results)):
         title = results[i]['properties']['Title']['title'][0]['plain_text']
         priority = results[i]['properties']['Priority']['select']
+        
+        # If the user has not set a priority, set it to 0
         if priority == None:
             priority = "0"
         else:
             priority = priority['name']
-            
+        
+        # Append the task and its priority to the list
         tasks.append([title, priority])
 
     # Sort tasks by priority in descending order
@@ -400,10 +427,14 @@ if __name__ == "__main__":
     google_calendar()
     print()
 
+    # Create the application
     app = QtWidgets.QApplication(sys.argv)
+    
+    # Set the icon of the application to the calendar icon
     icon = QtGui.QIcon(resource_path("AICalendar.png"))
     app.setWindowIcon(icon)
     
+    # Create the tray application and the GUI can be accessed from the tray application
     tray_app = TrayApp()
     tray_app.setToolTip("AICalendar")
     tray_app.show()
