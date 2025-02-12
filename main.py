@@ -5,15 +5,16 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from notion_client import Client as NotionClient
-from openai import OpenAI
+from google import genai
 import os
 from pydantic import BaseModel
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6 import QtCore, QtWidgets, QtGui
 import sys
+from datetime import datetime
 
-LIGHT_MODE_KEY = "light_mode"   
-CHATGPT_KEY = "chatgpt_key"
+LIGHT_MODE_KEY = "light_mode"
+GEMINI_KEY = "gemini_key"
 GOOGLE_AUTH = "google_auth"
 NOTION_TOKEN = "notion_token"
 
@@ -21,7 +22,7 @@ NOTION_TOKEN = "notion_token"
 
 settings = QtCore.QSettings("Yash", "AICalendar")
 
-chatgpt_client = OpenAI(api_key=settings.value(CHATGPT_KEY, "", type=str))
+gemini_client = genai.Client(api_key=settings.value(GEMINI_KEY, "", type=str))
 
 notion_key = settings.value(NOTION_TOKEN, "", type=str)
 if notion_key:
@@ -29,17 +30,19 @@ if notion_key:
 else:
     notion_client = None
 
-#TODO: Create an event and have it be returned from ChatGPT and then posted into google calendar
+#TODO: Create an event and have it be returned from Gemini and then posted into google calendar
 class Event(BaseModel):
     title: str
-    date: str
-    time: str
-    description: str
+    time_to_complete: int
+    time_start: int
+    time_end: int
+    day: int
+    month: int
 
 class PlainTextEdit(QtWidgets.QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-    
+        
     def insertFromMimeData(self, source):
         if source.hasText():
             self.insertPlainText(source.text())
@@ -70,15 +73,15 @@ class SettingsWindow(QtWidgets.QWidget):
         self.dark_mode_radio.setChecked(not light_mode)
         layout.addWidget(self.dark_mode_radio)
         
-        self.chatgpt_key_input = PlainTextEdit(self)
+        self.gemini_key_input = PlainTextEdit(self)
         
-        # Check if ChatGPT key is stored
-        if settings.value(CHATGPT_KEY, "", type=str):
-            self.chatgpt_key_input.setPlainText(settings.value(CHATGPT_KEY, "", type=str))
-        elif settings.value(CHATGPT_KEY, "", type=str) == "":
-            self.chatgpt_key_input.setPlaceholderText("Enter ChatGPT key here...")
+        # Check if Gemini key is stored
+        if settings.value(GEMINI_KEY, "", type=str):
+            self.gemini_key_input.setPlainText(settings.value(GEMINI_KEY, "", type=str))
+        elif settings.value(GEMINI_KEY, "", type=str) == "":
+            self.gemini_key_input.setPlaceholderText("Enter Gemini key here...")
                         
-        layout.addWidget(self.chatgpt_key_input)
+        layout.addWidget(self.gemini_key_input)
 
         self.notion_token_input = PlainTextEdit(self)
 
@@ -122,8 +125,8 @@ class SettingsWindow(QtWidgets.QWidget):
             self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
             settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
         
-        if self.chatgpt_key_input:
-            settings.setValue(CHATGPT_KEY, self.chatgpt_key_input.toPlainText())
+        if self.gemini_key_input:
+            settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
             update_api_key()
 
         if self.notion_token_input:
@@ -231,7 +234,7 @@ def apply_initial_theme(QWindow, light_mode):
         QWindow.setStyleSheet(dark_style)  # Dark mode for settings window
 
 def update_api_key():
-    chatgpt_client.api_key = settings.value(CHATGPT_KEY, "", type=str)
+    gemini_client.api_key = settings.value(GEMINI_KEY, "", type=str)
 
 def notion_key():
     notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
@@ -242,7 +245,7 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.abspath(relative_path)
 
-def notion():
+def get_tasks():
     my_page = notion_client.databases.query(
         **{
             "database_id": "6728f8a2330a4092860d6d358a4c33f3",
@@ -281,8 +284,10 @@ def notion():
     # Sort tasks by priority in descending order
     tasks.sort(key=lambda x: x[1], reverse=True)
 
-    print(tasks)
+    # print(tasks)
+    return tasks
 
+# currently just prints out the upcoming events in the next week and the calendars that are available
 def google_calendar():
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
@@ -305,6 +310,25 @@ def google_calendar():
     try:
         service = build("calendar", "v3", credentials=creds)
         
+        now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
+        print("Getting the upcoming 10 events")
+        events_result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=now,
+                timeMax=f"{year()}-{month()}-{day()+7}T23:59:59Z",
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
+        )
+        events = events_result.get("items", [])
+
+        for event in events:
+            start = event["start"].get("dateTime", event["start"].get("date"))
+            print(start, event["summary"])
+
         for v in service.calendarList().list().execute()['items']:
             print(f"{v['summary']}")
 
@@ -334,11 +358,47 @@ def google_calendar():
     except HttpError as error:
         print(f"An error occurred: {error}")
     
+# takes in a list of lists containing the task and its priority and generates a response using Gemini
+def generate_response(tasks):
+    task_list = ""
+    for task in tasks:
+        task_list += f"{task[0]}, Priority: {task[1]}\n"
+
+    # print(task_list)
+
+
+    prompt = f"""You are a bot that takes information about any given task and its priority, 
+    you will predict the time it will take to complete the task and list the start and end time in the a day.
+    The current date is {month()}/{day()}/{year()}.
+    Here are your list of tasks to schedule:
+
+    {task_list}
+    """
+    response = gemini_client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents=prompt,
+    config={
+        'response_mime_type': 'application/json',
+        'response_schema': list[Event],
+    },
+    )
+    # print(response.text)
+
+def day():
+    return datetime.now().day
+
+def month():
+    return datetime.now().month
+
+def year():
+    return datetime.now().year
 
 # Entry point for the application
 if __name__ == "__main__":
-    notion()
+    generate_response(get_tasks())
+    print()
     google_calendar()
+    print()
 
     app = QtWidgets.QApplication(sys.argv)
     icon = QtGui.QIcon(resource_path("AICalendar.png"))
