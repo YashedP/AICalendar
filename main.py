@@ -133,7 +133,7 @@ class SettingsWindow(QtWidgets.QWidget):
         
         if self.gemini_key_input:
             settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
-            update_api_key()
+            update_gemini_api_key()
 
         if self.notion_token_input:
             settings.setValue(NOTION_TOKEN, self.notion_token_input.toPlainText())
@@ -337,7 +337,7 @@ def google_calendar():
     try:
         service = build("calendar", "v3", credentials=creds)
         
-        now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
+        now = datetime.datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
         print("Getting the upcoming 10 events")
         events_result = (
             service.events()
@@ -412,13 +412,13 @@ def generate_response(tasks):
     # print(response.text)
 
 def day():
-    return datetime.now().day
+    return datetime.datetime.now().day
 
 def month():
-    return datetime.now().month
+    return datetime.datetime.now().month
 
 def year():
-    return datetime.now().year
+    return datetime.datetime.now().year
 
 # Entry point for the application
 if __name__ == "__main__":
