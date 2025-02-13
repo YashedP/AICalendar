@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -360,11 +360,11 @@ def google_calendar():
             end = event["end"].get("dateTime", event["end"].get("date"))
             print(start, end, event["summary"])
 
-            start_obj = datetime.datetime.fromisoformat(start)
+            start_obj = datetime.fromisoformat(start)
             formatted_start = start_obj.strftime("%H%M")
             # print(f"Formatted start: {formatted_start}")
 
-            end_obj = datetime.datetime.fromisoformat(end)
+            end_obj = datetime.fromisoformat(end)
             formatted_end = end_obj.strftime("%H%M")
             # print(f"Formatted end: {formatted_end}")
             busy_times.append([start_obj.month, start_obj.day, formatted_start, formatted_end])
