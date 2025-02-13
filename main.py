@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -33,13 +33,18 @@ if settings.value(NOTION_TOKEN, "", type=str):
 else:
     notion_client = None
 
+# class Event(BaseModel):
+#     title: str
+#     time_to_complete: str
+#     time_start: str
+#     time_end: str
+#     day: int
+#     month: int
+
 class Event(BaseModel):
     title: str
-    time_to_complete: int
-    time_start: int
-    time_end: int
-    day: int
-    month: int
+    start: str
+    end: str
 
 # Overwrites the default text formatting so that the text is not formatted when pasted
 class PlainTextEdit(QtWidgets.QTextEdit):
@@ -317,7 +322,7 @@ def get_tasks():
     return tasks
 
 # currently just prints out the upcoming events in the next week and the calendars that are available
-def google_calendar():
+def get_busy_times():
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
     creds = None
@@ -339,8 +344,9 @@ def google_calendar():
     try:
         service = build("calendar", "v3", credentials=creds)
         
-        now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
-        print("Getting upcoming events in the next week")
+        now = datetime.now().isoformat() + "-05:00" #* EST
+        # print(now)
+        # print("Getting upcoming events in the next week")
         events_result = (
             service.events()
             .list(
@@ -358,24 +364,25 @@ def google_calendar():
         for event in events:
             start = event["start"].get("dateTime", event["start"].get("date"))
             end = event["end"].get("dateTime", event["end"].get("date"))
-            print(start, end, event["summary"])
+            # print(start, end, event["summary"])
 
-            start_obj = datetime.fromisoformat(start)
-            formatted_start = start_obj.strftime("%H%M")
-            # print(f"Formatted start: {formatted_start}")
-
-            end_obj = datetime.fromisoformat(end)
-            formatted_end = end_obj.strftime("%H%M")
-            # print(f"Formatted end: {formatted_end}")
-            busy_times.append([start_obj.month, start_obj.day, formatted_start, formatted_end])
-
+            busy_times.append([start, end])
+        # print(busy_times)
         return busy_times
 
-        # for busy_time in busy_times:
-        #     print(busy_time)
 
-        for v in service.calendarList().list().execute()['items']:
-            print(f"{v['summary']}")
+            #*prevoius formatting
+            # start_obj = datetime.fromisoformat(start)
+            # formatted_start = start_obj.strftime("%H%M")
+            # # print(f"Formatted start: {formatted_start}")
+
+            # end_obj = datetime.fromisoformat(end)
+            # formatted_end = end_obj.strftime("%H%M")
+            # # print(f"Formatted end: {formatted_end}")
+            # busy_times.append([start_obj.month, start_obj.day, formatted_start, formatted_end])
+
+        # for v in service.calendarList().list().execute()['items']:
+        #     print(f"{v['summary']}")
 
         # Call the Calendar API
         # now = datetime.datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
@@ -402,7 +409,12 @@ def google_calendar():
         #     print(start, event["summary"])
     except HttpError as error:
         print(f"An error occurred: {error}")
+
+def schedule_tasks(response):
+    tasks_json = response
+    print(response.text)
     
+
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
 def generate_response(tasks, busy_times):
     task_list = ""
@@ -411,9 +423,9 @@ def generate_response(tasks, busy_times):
 
     busy_time_list = ""
     for busy_time in busy_times:
-        busy_time_list += f"From {busy_time[2]} - {busy_time[3]} on {busy_time[0]}/{busy_time[1]}\n"
+        busy_time_list += f"dateTime start: {busy_time[0]}, dateTime end: {busy_time[1]}\n"
 
-    print(busy_time_list)
+    # print(busy_time_list)
 
     prompt = f"""You are a bot that takes information about any given task and its priority, 
     you will predict the time it will take to complete the task and list the start and end time in the a day.
@@ -435,7 +447,7 @@ def generate_response(tasks, busy_times):
         'response_schema': list[Event],
     },
     )
-    print(response.text)
+    return response
 
 def day():
     return datetime.now().day
@@ -448,9 +460,8 @@ def year():
 
 # Entry point for the application
 if __name__ == "__main__":
-    generate_response(get_tasks(), google_calendar())
-    print()
-    print()
+    schedule_tasks(generate_response(get_tasks(), get_busy_times()))
+
 
     # Create the application
     app = QtWidgets.QApplication(sys.argv)
