@@ -340,7 +340,7 @@ def google_calendar():
         service = build("calendar", "v3", credentials=creds)
         
         now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
-        print("Getting the upcoming 10 events")
+        print("Getting upcoming events in the next week")
         events_result = (
             service.events()
             .list(
@@ -354,9 +354,25 @@ def google_calendar():
         )
         events = events_result.get("items", [])
 
+        busy_times = []
         for event in events:
             start = event["start"].get("dateTime", event["start"].get("date"))
-            print(start, event["summary"])
+            end = event["end"].get("dateTime", event["end"].get("date"))
+            print(start, end, event["summary"])
+
+            start_obj = datetime.datetime.fromisoformat(start)
+            formatted_start = start_obj.strftime("%H%M")
+            # print(f"Formatted start: {formatted_start}")
+
+            end_obj = datetime.datetime.fromisoformat(end)
+            formatted_end = end_obj.strftime("%H%M")
+            # print(f"Formatted end: {formatted_end}")
+            busy_times.append([start_obj.month, start_obj.day, formatted_start, formatted_end])
+
+        return busy_times
+
+        # for busy_time in busy_times:
+        #     print(busy_time)
 
         for v in service.calendarList().list().execute()['items']:
             print(f"{v['summary']}")
@@ -389,14 +405,12 @@ def google_calendar():
     
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
 def generate_response(tasks):
-    if gemini_client is None:
-        return
-    
     task_list = ""
     for task in tasks:
         task_list += f"{task[0]}, Priority: {task[1]}\n"
 
     # print(task_list)
+
 
     prompt = f"""You are a bot that takes information about any given task and its priority, 
     you will predict the time it will take to complete the task and list the start and end time in the a day.
@@ -404,6 +418,10 @@ def generate_response(tasks):
     Here are your list of tasks to schedule:
 
     {task_list}
+
+    Here are times the user is busy, you should avoid scheduling tasks during these times:
+
+    {busy_time_list}
     """
     
     response = gemini_client.models.generate_content(
@@ -414,7 +432,7 @@ def generate_response(tasks):
         'response_schema': list[Event],
     },
     )
-    # print(response.text)
+    print(response.text)
 
 def day():
     return datetime.now().day
@@ -427,9 +445,8 @@ def year():
 
 # Entry point for the application
 if __name__ == "__main__":
-    generate_response(get_tasks())
+    generate_response(get_tasks(), google_calendar())
     print()
-    google_calendar()
     print()
 
     # Create the application
