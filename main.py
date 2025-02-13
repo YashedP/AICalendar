@@ -1,4 +1,4 @@
-from datetime import datetime
+import datetime
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -404,13 +404,16 @@ def google_calendar():
         print(f"An error occurred: {error}")
     
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
-def generate_response(tasks):
+def generate_response(tasks, busy_times):
     task_list = ""
     for task in tasks:
         task_list += f"{task[0]}, Priority: {task[1]}\n"
 
-    # print(task_list)
+    busy_time_list = ""
+    for busy_time in busy_times:
+        busy_time_list += f"From {busy_time[2]} - {busy_time[3]} on {busy_time[0]}/{busy_time[1]}\n"
 
+    print(busy_time_list)
 
     prompt = f"""You are a bot that takes information about any given task and its priority, 
     you will predict the time it will take to complete the task and list the start and end time in the a day.
@@ -423,7 +426,7 @@ def generate_response(tasks):
 
     {busy_time_list}
     """
-    
+
     response = gemini_client.models.generate_content(
     model="gemini-2.0-flash",
     contents=prompt,
