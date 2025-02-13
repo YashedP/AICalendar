@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -269,9 +269,11 @@ def resource_path(relative_path):
 
 def get_tasks():
     # Get all tasks that are not done and are schedulable
+    database_id = "6728f8a2330a4092860d6d358a4c33f3"
+
     my_page = notion_client.databases.query(
         **{
-            "database_id": "6728f8a2330a4092860d6d358a4c33f3",
+            "database_id": database_id,
             "filter": {
                 "and": [
                     {
@@ -337,7 +339,7 @@ def google_calendar():
     try:
         service = build("calendar", "v3", credentials=creds)
         
-        now = datetime.datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
+        now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
         print("Getting the upcoming 10 events")
         events_result = (
             service.events()
@@ -387,12 +389,14 @@ def google_calendar():
     
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
 def generate_response(tasks):
+    if gemini_client is None:
+        return
+    
     task_list = ""
     for task in tasks:
         task_list += f"{task[0]}, Priority: {task[1]}\n"
 
     # print(task_list)
-
 
     prompt = f"""You are a bot that takes information about any given task and its priority, 
     you will predict the time it will take to complete the task and list the start and end time in the a day.
@@ -401,6 +405,7 @@ def generate_response(tasks):
 
     {task_list}
     """
+    
     response = gemini_client.models.generate_content(
     model="gemini-2.0-flash",
     contents=prompt,
@@ -412,13 +417,13 @@ def generate_response(tasks):
     # print(response.text)
 
 def day():
-    return datetime.datetime.now().day
+    return datetime.now().day
 
 def month():
-    return datetime.datetime.now().month
+    return datetime.now().month
 
 def year():
-    return datetime.datetime.now().year
+    return datetime.now().year
 
 # Entry point for the application
 if __name__ == "__main__":
