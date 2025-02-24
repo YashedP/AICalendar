@@ -165,8 +165,8 @@ class SettingsWindow(QtWidgets.QWidget):
         self.google_auth.clicked.connect(self.select_google_auth)
         self.google_auth_label = QtWidgets.QLabel("No file Selected")
 
-        layout.addWidget(self.google_auth)
         layout.addWidget(self.google_auth_label)
+        layout.addWidget(self.google_auth)
 
         self.google_auth_file = settings.value(GOOGLE_AUTH, "", type=str)
         
