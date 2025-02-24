@@ -74,8 +74,8 @@ class SettingsWindow(QtWidgets.QWidget):
         # Layout for settings window
         layout = QtWidgets.QVBoxLayout(self)
 
-        mode_label = QtWidgets.QLabel("Select Theme:")
-        layout.addWidget(mode_label)
+        self.mode_label = QtWidgets.QLabel("Select Theme:")
+        layout.addWidget(self.mode_label)
         
         self.light_mode_radio = QtWidgets.QRadioButton("Light Mode")
         self.light_mode_radio.setChecked(light_mode)
@@ -110,10 +110,16 @@ class SettingsWindow(QtWidgets.QWidget):
         self.completer = QtWidgets.QCompleter(times)
         self.completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
 
+        self.lower_bound_label = QtWidgets.QLabel("Start Time:")
+        layout.addWidget(self.lower_bound_label)
+
         self.lower_bound_input.setCompleter(self.completer)
         self.lower_bound_input.editingFinished.connect(lambda: self.format_time("lower"))
 
         layout.addWidget(self.lower_bound_input)
+
+        self.upper_bound_label = QtWidgets.QLabel("End Time:")
+        layout.addWidget(self.upper_bound_label)
 
         self.upper_bound_input = QtWidgets.QLineEdit()
         self.upper_bound_input.setText(self.upper_default_time)
@@ -123,6 +129,9 @@ class SettingsWindow(QtWidgets.QWidget):
 
         layout.addWidget(self.upper_bound_input)
 
+        self.gemini_label = QtWidgets.QLabel("Gemini API Key:")
+        layout.addWidget(self.gemini_label)
+
         # Check if Gemini key is stored
         if settings.value(GEMINI_KEY, "", type=str):
             self.gemini_key_input.setPlainText(settings.value(GEMINI_KEY, "", type=str))
@@ -130,6 +139,9 @@ class SettingsWindow(QtWidgets.QWidget):
             self.gemini_key_input.setPlaceholderText("Enter Gemini key here...")
                         
         layout.addWidget(self.gemini_key_input)
+
+        self.notion_label = QtWidgets.QLabel("Notion API Key:")
+        layout.addWidget(self.notion_label)
 
         self.notion_token_input = PlainTextEdit(self)
 
@@ -160,50 +172,6 @@ class SettingsWindow(QtWidgets.QWidget):
 
         apply_initial_theme(self, light_mode)
 
-    # Applies Settings
-    def apply_settings(self):
-        upper = self.upper_bound_input.text().strip()
-        lower = self.lower_bound_input.text().strip()
-        
-        lower_time_obj = datetime.strptime(lower, "%I:%M %p")
-        upper_time_obj = datetime.strptime(upper, "%I:%M %p")
-
-        # Checks if the upper time is before the lower time
-        if upper_time_obj < lower_time_obj:
-            QtWidgets.QMessageBox.critical(self, "Error", "You cannot have the end time occur before the start time!", QtWidgets.QMessageBox.Ok)
-            return
-
-        """Apply the selected settings."""
-        if self.light_mode_radio.isChecked():
-            self.setStyleSheet("")  # Light mode (default)
-            self.main_widget.setStyleSheet("")  # Light mode for main widget
-            settings.setValue(LIGHT_MODE_KEY, True)  # Save preference
-        elif self.dark_mode_radio.isChecked():
-            dark_style = "background-color: #2e2e2e; color: white;"
-            self.setStyleSheet(dark_style)  # Dark mode for settings window
-            self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
-            settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
-        
-        lower_iso_time = "T" + lower_time_obj.strftime("%H:%M:%S")
-        upper_iso_time = "T" + upper_time_obj.strftime("%H:%M:%S")
-
-        settings.setValue("lower_bound", lower_iso_time)
-        settings.setValue("upper_bound", upper_iso_time)
-
-        if self.gemini_key_input:
-            settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
-            update_gemini_api_key()
-
-        if self.notion_token_input:
-            settings.setValue(NOTION_TOKEN, self.notion_token_input.toPlainText())
-            notion_key()
-
-        if self.google_auth_file:
-            settings.setValue(GOOGLE_AUTH, self.google_auth_label.text().split(": ")[1])
-        
-        # Set Gemini API key
-        update_gemini_api_key()
-        
     # Select Google Auth File
     def select_google_auth(self):
         """Open file dialog to select a .tex file."""
@@ -283,6 +251,50 @@ class SettingsWindow(QtWidgets.QWidget):
             return
         else:
             text_input.setText(previous_time)
+
+    # Applies Settings
+    def apply_settings(self):
+        upper = self.upper_bound_input.text().strip()
+        lower = self.lower_bound_input.text().strip()
+        
+        lower_time_obj = datetime.strptime(lower, "%I:%M %p")
+        upper_time_obj = datetime.strptime(upper, "%I:%M %p")
+
+        # Checks if the upper time is before the lower time
+        if upper_time_obj < lower_time_obj:
+            QtWidgets.QMessageBox.critical(self, "Error", "You cannot have the end time occur before the start time!", QtWidgets.QMessageBox.Ok)
+            return
+
+        """Apply the selected settings."""
+        if self.light_mode_radio.isChecked():
+            self.setStyleSheet("")  # Light mode (default)
+            self.main_widget.setStyleSheet("")  # Light mode for main widget
+            settings.setValue(LIGHT_MODE_KEY, True)  # Save preference
+        elif self.dark_mode_radio.isChecked():
+            dark_style = "background-color: #2e2e2e; color: white;"
+            self.setStyleSheet(dark_style)  # Dark mode for settings window
+            self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
+            settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
+        
+        lower_iso_time = "T" + lower_time_obj.strftime("%H:%M:%S")
+        upper_iso_time = "T" + upper_time_obj.strftime("%H:%M:%S")
+
+        settings.setValue("lower_bound", lower_iso_time)
+        settings.setValue("upper_bound", upper_iso_time)
+
+        if self.gemini_key_input:
+            settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
+            update_gemini_api_key()
+
+        if self.notion_token_input:
+            settings.setValue(NOTION_TOKEN, self.notion_token_input.toPlainText())
+            notion_key()
+
+        if self.google_auth_file:
+            settings.setValue(GOOGLE_AUTH, self.google_auth_label.text().split(": ")[1])
+        
+        # Set Gemini API key
+        update_gemini_api_key()
 
 # Tray window class
 class TrayApp(QtWidgets.QSystemTrayIcon):
