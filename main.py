@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime, timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -87,14 +88,13 @@ class SettingsWindow(QtWidgets.QWidget):
         
         self.gemini_key_input = PlainTextEdit(self)
         
-        self.lower_default_time = datetime.strptime(settings.value("lower_bound", "T7:00:00", type=str)[1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
-        self.upper_default_time = datetime.strptime(settings.value("upper_bound", "T22:00:00", type=str)[1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
+        self.times = settings.value("work_hours", [["T07:00:00", "T22:00:00"]] * 7, type=list)
 
-        self.prev_lower_time = self.lower_default_time
-        self.prev_upper_time = self.upper_default_time
+        for i in range(len(self.times)):
+            self.times[i][0] = datetime.strptime(self.times[i][0][1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
+            self.times[i][1] = datetime.strptime(self.times[i][1][1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
 
-        self.lower_bound_input = QtWidgets.QLineEdit()
-        self.lower_bound_input.setText(self.lower_default_time)
+        self.prev_time = copy.deepcopy(self.times)
 
         # Times for autocompletion
         times = [f"{h}:00 AM" for h in range(1, 12)] + ["12:00 PM"]
@@ -110,32 +110,31 @@ class SettingsWindow(QtWidgets.QWidget):
         self.completer = QtWidgets.QCompleter(times)
         self.completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
 
-        self.lower_bound = QtWidgets.QHBoxLayout()
+        self.grid_time_layout = QtWidgets.QGridLayout()
 
-        self.lower_bound_label = QtWidgets.QLabel("Start Time:")
-        self.lower_bound.addWidget(self.lower_bound_label)
+        self.grid_time_layout.addWidget(QtWidgets.QLabel("Day"), 0, 0)
+        self.grid_time_layout.addWidget(QtWidgets.QLabel("Start Time"), 0, 1)
+        self.grid_time_layout.addWidget(QtWidgets.QLabel("End Time"), 0, 2)
 
-        self.lower_bound_input.setCompleter(self.completer)
-        self.lower_bound_input.editingFinished.connect(lambda: self.format_time("lower"))
+        self.days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        for i in range(len(self.times)):
+            label = QtWidgets.QLabel(self.days[i])
 
-        self.lower_bound.addWidget(self.lower_bound_input)
+            lower_bound_input = QtWidgets.QLineEdit()
+            lower_bound_input.setText(self.times[i][0])
+            lower_bound_input.setCompleter(self.completer)
+            lower_bound_input.editingFinished.connect(lambda i=i: self.format_time(i, "lower"))
 
-        layout.addLayout(self.lower_bound)
+            upper_bound_input = QtWidgets.QLineEdit()
+            upper_bound_input.setText(self.times[i][1])
+            upper_bound_input.setCompleter(self.completer)
+            upper_bound_input.editingFinished.connect(lambda i=i: self.format_time(i, "upper"))
 
-        self.upper_bound = QtWidgets.QHBoxLayout()
+            self.grid_time_layout.addWidget(label, i + 1, 0)
+            self.grid_time_layout.addWidget(lower_bound_input, i + 1, 1)
+            self.grid_time_layout.addWidget(upper_bound_input, i + 1, 2)
 
-        self.upper_bound_label = QtWidgets.QLabel("End Time:")
-        self.upper_bound.addWidget(self.upper_bound_label)
-
-        self.upper_bound_input = QtWidgets.QLineEdit()
-        self.upper_bound_input.setText(self.upper_default_time)
-
-        self.upper_bound_input.setCompleter(self.completer)
-        self.upper_bound_input.editingFinished.connect(lambda: self.format_time("upper"))
-
-        self.upper_bound.addWidget(self.upper_bound_input)
-
-        layout.addLayout(self.upper_bound)
+        layout.addLayout(self.grid_time_layout)
 
         self.gemini_label = QtWidgets.QLabel("Gemini API Key:")
         layout.addWidget(self.gemini_label)
@@ -189,13 +188,13 @@ class SettingsWindow(QtWidgets.QWidget):
             self.google_auth_file = file_path
             self.google_auth_label.setText(f"Google Auth File: {file_path}")
 
-    def format_time(self, bound):
+    def format_time(self, i, bound):
         if bound == "lower":
-            text_input = self.lower_bound_input
-            previous_time = self.prev_lower_time
+            text_input = self.grid_time_layout.itemAtPosition(i + 1, 1).widget()
+            previous_time = self.prev_time[i][0]
         else:
-            text_input = self.upper_bound_input
-            previous_time = self.prev_upper_time
+            text_input = self.grid_time_layout.itemAtPosition(i + 1, 2).widget()
+            previous_time = self.prev_time[i][1]
         
         text = text_input.text().strip()
 
@@ -218,9 +217,9 @@ class SettingsWindow(QtWidgets.QWidget):
 
             text_input.setText(formatted_time)
             if bound == "lower":
-                self.prev_lower_time = formatted_time
+                self.prev_time[i][0] = formatted_time
             else:
-                self.prev_upper_time = formatted_time
+                self.prev_time[i][1] = formatted_time
             return
     
         # Handle cases like "9am", "14:30", "2:30 pm"
@@ -253,27 +252,31 @@ class SettingsWindow(QtWidgets.QWidget):
             text_input.setText(formatted_time)
             
             if bound == "lower":
-                self.prev_lower_time = formatted_time
+                self.prev_time[i][0] = formatted_time
             else:
-                self.prev_upper_time = formatted_time
+                self.prev_time[i][1] = formatted_time
             return
         else:
             text_input.setText(previous_time)
 
     # Applies Settings
     def apply_settings(self):
-        upper = self.upper_bound_input.text().strip()
-        lower = self.lower_bound_input.text().strip()
-        
-        lower_time_obj = datetime.strptime(lower, "%I:%M %p")
-        upper_time_obj = datetime.strptime(upper, "%I:%M %p")
-
-        # Checks if the upper time is before the lower time
-        if upper_time_obj < lower_time_obj:
-            QtWidgets.QMessageBox.critical(self, "Error", "You cannot have the end time occur before the start time!", QtWidgets.QMessageBox.Ok)
-            return
-
         """Apply the selected settings."""
+        times = []
+        for i in range(len(self.days)):
+            lower_time_obj = datetime.strptime(self.grid_time_layout.itemAtPosition(i + 1, 1).widget().text(), "%I:%M %p")
+            upper_time_obj = datetime.strptime(self.grid_time_layout.itemAtPosition(i + 1, 2).widget().text(), "%I:%M %p")
+
+            lower = "T" + lower_time_obj.strftime("%H:%M:%S")
+            upper = "T" + upper_time_obj.strftime("%H:%M:%S")
+
+            # Checks if the upper time is before the lower time
+            if upper_time_obj < lower_time_obj:
+                QtWidgets.QMessageBox.critical(self, "Error", "You cannot have the end time occur before the start time!", QtWidgets.QMessageBox.Ok)
+                return
+
+            times += [[lower, upper]]
+
         if self.light_mode_radio.isChecked():
             self.setStyleSheet("")  # Light mode (default)
             self.main_widget.setStyleSheet("")  # Light mode for main widget
@@ -283,12 +286,8 @@ class SettingsWindow(QtWidgets.QWidget):
             self.setStyleSheet(dark_style)  # Dark mode for settings window
             self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
             settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
-        
-        lower_iso_time = "T" + lower_time_obj.strftime("%H:%M:%S")
-        upper_iso_time = "T" + upper_time_obj.strftime("%H:%M:%S")
 
-        settings.setValue("lower_bound", lower_iso_time)
-        settings.setValue("upper_bound", upper_iso_time)
+        settings.setValue("work_hours", times)
 
         if self.gemini_key_input:
             settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
@@ -334,6 +333,10 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         test = menu.addAction("Test")
         test.triggered.connect(self.test)
 
+        # Add "Reset Settings" option
+        resetSettings = menu.addAction("Reset Settings")
+        resetSettings.triggered.connect(self.resetSettings)
+
         # Add "Exit" option
         exit_action = menu.addAction("Exit")
         exit_action.triggered.connect(self.exit_app)
@@ -363,7 +366,10 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
     
     def test(self):
         # schedule_tasks(generate_response(get_tasks(), get_busy_times()))
-        checkAITaskCalendar()
+        createAICalendar()
+    
+    def resetSettings(self):
+        settings.clear()
 
 # Main window class
 class MainWindow(QtWidgets.QMainWindow):
