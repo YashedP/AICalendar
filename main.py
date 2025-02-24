@@ -282,10 +282,10 @@ def get_tasks():
             "filter": {
                 "and": [
                     {
-                        "property": "Done",
-                        "checkbox": {
-                            "equals": False,
-                        },
+                        "property": "Status",
+                        "status": {
+                            "does_not_equal": "Done",
+                        }
                     },
                     {
                         "property": "Schedulable",
@@ -318,7 +318,7 @@ def get_tasks():
     # Sort tasks by priority in descending order
     tasks.sort(key=lambda x: x[1], reverse=True)
 
-    # print(tasks)
+    print(tasks)
     return tasks
 
 # currently just prints out the upcoming events in the next week and the calendars that are available
