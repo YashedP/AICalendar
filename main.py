@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -10,7 +10,7 @@ from notion_client import Client as NotionClient
 import os
 from pydantic import BaseModel
 from PySide6 import QtCore, QtWidgets, QtGui
-from PySide6 import QtCore, QtWidgets, QtGui
+import re
 import sys
 
 LIGHT_MODE_KEY = "light_mode"
@@ -18,14 +18,12 @@ GEMINI_KEY = "gemini_key"
 GOOGLE_AUTH = "google_auth"
 NOTION_TOKEN = "notion_token"
 
-
-#todo plan ahead using yash's issues in advance. for example even if i dont want to implement something now, give it a placeholder value
-
 # "https://www.notion.so/Ultimate-Tasks-Manager-bfbf17347efa413c9ea5ec315b28145a?pvs=4"
 
 # Qt decides where to store the settings based on the OS
 settings = QtCore.QSettings("Yash", "AICalendar")
 
+# Check if gemini key is stored, if so create a gemini client
 if settings.value(GEMINI_KEY, "", type=str):
     gemini_client = genai.Client(api_key=settings.value(GEMINI_KEY, "", type=str))
 else:
@@ -89,6 +87,42 @@ class SettingsWindow(QtWidgets.QWidget):
         
         self.gemini_key_input = PlainTextEdit(self)
         
+        self.lower_default_time = datetime.strptime(settings.value("lower_bound", "T7:00:00", type=str)[1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
+        self.upper_default_time = datetime.strptime(settings.value("upper_bound", "T22:00:00", type=str)[1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
+
+        self.prev_lower_time = self.lower_default_time
+        self.prev_upper_time = self.upper_default_time
+
+        self.lower_bound_input = QtWidgets.QLineEdit()
+        self.lower_bound_input.setText(self.lower_default_time)
+
+        # Times for autocompletion
+        times = [f"{h}:00 AM" for h in range(1, 12)] + ["12:00 PM"]
+        times += [f"{h}:15 AM" for h in range(1, 12)] + ["12:15 PM"]
+        times += [f"{h}:30 AM" for h in range(1, 12)] + ["12:30 PM"]
+        times += [f"{h}:45 AM" for h in range(1, 12)] + ["12:45 PM"]
+
+        times += [f"{h}:00 PM" for h in range(1, 12)]
+        times += [f"{h}:15 PM" for h in range(1, 12)]
+        times += [f"{h}:30 PM" for h in range(1, 12)]
+        times += [f"{h}:45 PM" for h in range(1, 12)]
+
+        self.completer = QtWidgets.QCompleter(times)
+        self.completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+
+        self.lower_bound_input.setCompleter(self.completer)
+        self.lower_bound_input.editingFinished.connect(lambda: self.format_time("lower"))
+
+        layout.addWidget(self.lower_bound_input)
+
+        self.upper_bound_input = QtWidgets.QLineEdit()
+        self.upper_bound_input.setText(self.upper_default_time)
+
+        self.upper_bound_input.setCompleter(self.completer)
+        self.upper_bound_input.editingFinished.connect(lambda: self.format_time("upper"))
+
+        layout.addWidget(self.upper_bound_input)
+
         # Check if Gemini key is stored
         if settings.value(GEMINI_KEY, "", type=str):
             self.gemini_key_input.setPlainText(settings.value(GEMINI_KEY, "", type=str))
@@ -119,7 +153,6 @@ class SettingsWindow(QtWidgets.QWidget):
         if self.google_auth_file:
             self.google_auth_label.setText(f"Google Auth File: {self.google_auth_file}")
     
-
         # Save button
         save_button = QtWidgets.QPushButton("Save")
         save_button.clicked.connect(self.apply_settings)
@@ -129,6 +162,17 @@ class SettingsWindow(QtWidgets.QWidget):
 
     # Applies Settings
     def apply_settings(self):
+        upper = self.upper_bound_input.text().strip()
+        lower = self.lower_bound_input.text().strip()
+        
+        lower_time_obj = datetime.strptime(lower, "%I:%M %p")
+        upper_time_obj = datetime.strptime(upper, "%I:%M %p")
+
+        # Checks if the upper time is before the lower time
+        if upper_time_obj < lower_time_obj:
+            QtWidgets.QMessageBox.critical(self, "Error", "You cannot have the end time occur before the start time!", QtWidgets.QMessageBox.Ok)
+            return
+
         """Apply the selected settings."""
         if self.light_mode_radio.isChecked():
             self.setStyleSheet("")  # Light mode (default)
@@ -140,6 +184,12 @@ class SettingsWindow(QtWidgets.QWidget):
             self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
             settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
         
+        lower_iso_time = "T" + lower_time_obj.strftime("%H:%M:%S")
+        upper_iso_time = "T" + upper_time_obj.strftime("%H:%M:%S")
+
+        settings.setValue("lower_bound", lower_iso_time)
+        settings.setValue("upper_bound", upper_iso_time)
+
         if self.gemini_key_input:
             settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
             update_gemini_api_key()
@@ -163,6 +213,77 @@ class SettingsWindow(QtWidgets.QWidget):
             self.google_auth_file = file_path
             self.google_auth_label.setText(f"Google Auth File: {file_path}")
 
+    def format_time(self, bound):
+        if bound == "lower":
+            text_input = self.lower_bound_input
+            previous_time = self.prev_lower_time
+        else:
+            text_input = self.upper_bound_input
+            previous_time = self.prev_upper_time
+        
+        text = text_input.text().strip()
+
+        # Handle "930" --> 9:30 AM
+        if re.match(r"^\d{3, 4}", text):
+            hour = int(text[:-2])
+            minute = int(text[-2:])
+
+            if minute >= 60:
+                text_input.setText(previous_time)
+                return
+            if hour == 24 or hour == 0:
+                formatted_time = f"12:{minute:02} AM"
+            elif hour == 12: # Noon
+                formatted_time = f"12:{minute:02} PM"
+            elif hour > 12: # Convert 24-hour to 12-hour
+                formatted_time = f"{hour - 12}:{minute:02} PM"
+            else:
+                formatted_time = f"{hour}:{minute:02} AM"
+
+            text_input.setText(formatted_time)
+            if bound == "lower":
+                self.prev_lower_time = formatted_time
+            else:
+                self.prev_upper_time = formatted_time
+            return
+    
+        # Handle cases like "9am", "14:30", "2:30 pm"
+        match = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", text)
+        if match:
+            hour, minute, period = match.groups()
+            hour, minute = int(hour), int(minute) if minute else 0
+
+            if minute >= 60:
+                text_input.setText(previous_time)
+                return
+
+            # Special Cases : 24 AM -> 12 PM, 00 AM -> 12 AM
+            if hour == 24:
+                hour = 12
+                period = "PM"
+            elif hour == 0:
+                hour = 12
+                period = "AM"
+            
+            # If no period provided, infer it
+            if not period:
+                if hour > 12:
+                    period = "PM"
+                    hour -= 12
+                else:
+                    period = "AM"
+            
+            formatted_time = f"{hour}:{minute:02} {period.upper()}"
+            text_input.setText(formatted_time)
+            
+            if bound == "lower":
+                self.prev_lower_time = formatted_time
+            else:
+                self.prev_upper_time = formatted_time
+            return
+        else:
+            text_input.setText(previous_time)
+
 # Tray window class
 class TrayApp(QtWidgets.QSystemTrayIcon):
     def __init__(self, parent=None):
@@ -170,6 +291,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
 
         # Set the icon of the tray application to the calendar icon
         self.setIcon(QtGui.QIcon(resource_path("AICalendar.png")))
+        
         # Create the menu
         menu = QtWidgets.QMenu()
 
@@ -180,6 +302,17 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         # Add Regenerate Day option
         regenerate_day = menu.addAction("Regenerate Day")
         regenerate_day.triggered.connect(self.regenerate_day)
+
+        # Add Regenerate Day option
+        regenerate_3_days = menu.addAction("Regenerate 3 Days")
+        regenerate_3_days.triggered.connect(self.regenerate_3_days)
+
+        # Add Regenerate Day option
+        regenerate_week = menu.addAction("Regenerate Week")
+        regenerate_week.triggered.connect(self.regenerate_week)
+
+        test = menu.addAction("Test")
+        test.triggered.connect(self.test)
 
         # Add "Exit" option
         exit_action = menu.addAction("Exit")
@@ -201,6 +334,15 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
     # Regenerate the day
     def regenerate_day(self):
         print("Regenerating Day...")
+
+    def regenerate_3_days(self):
+        print("Regenerating 3 Days...")
+    
+    def regenerate_week(self):
+        print("Regenerating Week...")
+    
+    def test(self):
+        schedule_tasks(generate_response(get_tasks(), get_busy_times()))
 
 # Main window class
 class MainWindow(QtWidgets.QMainWindow):
@@ -272,7 +414,7 @@ def notion_key():
 
 def resource_path(relative_path):
     """Get the absolute path to the resource, works for development and PyInstaller builds."""
-    if getattr(sys, '_MEIPASS', None):  # Check if running from PyInstaller
+    if getattr(sys, '_MEIPASS', None): # Check if running from PyInstaller
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.abspath(relative_path)
 
@@ -351,13 +493,10 @@ def get_busy_times():
             os.remove("token.json")
             print("Refresh error, token.json removed")
 
-
     try:
         service = build("calendar", "v3", credentials=creds)
-        # print(now)
-        # print("Getting upcoming events in the next week")
-        
-        now = datetime.now().isoformat() + "-05:00" # EST #ToDo add capability for user to choose timezone
+
+        now = datetime.now().isoformat() + "-05:00"
         timeMax = (datetime.now() + timedelta(days=7)).isoformat() + "-05:00"
 
         events_result = (
@@ -377,61 +516,23 @@ def get_busy_times():
         for event in events:
             start = event["start"].get("dateTime", event["start"].get("date"))
             end = event["end"].get("dateTime", event["end"].get("date"))
-            # print(start, end, event["summary"])
 
             busy_times.append([start, end])
-        # print(busy_times)
+
         return busy_times
-
-
-            #*prevoius formatting
-            # start_obj = datetime.fromisoformat(start)
-            # formatted_start = start_obj.strftime("%H%M")
-            # # print(f"Formatted start: {formatted_start}")
-
-            # end_obj = datetime.fromisoformat(end)
-            # formatted_end = end_obj.strftime("%H%M")
-            # # print(f"Formatted end: {formatted_end}")
-            # busy_times.append([start_obj.month, start_obj.day, formatted_start, formatted_end])
-
-        # for v in service.calendarList().list().execute()['items']:
-        #     print(f"{v['summary']}")
-
-        # Call the Calendar API
-        # now = datetime.datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
-
-        # events_result = (
-        #     service.events()
-        #     .list(
-        #         calendarId="primary",
-        #         timeMin=now,
-        #         maxResults=10,
-        #         singleEvents=True,
-        #         orderBy="startTime",
-        #     )
-        #     .execute()
-        # )
-        # events = events_result.get("items", [])
-
-        # if not events:
-        #     print("No upcoming events found.")
-
-        # # Prints the start and name of the next 10 events
-        # for event in events:
-        #     start = event["start"].get("dateTime", event["start"].get("date"))
-        #     print(start, event["summary"])
     except HttpError as error:
         print(f"HttpError error occurred: {error}")
 
 def schedule_tasks(response):
     if response == None:
         return
+    
     tasks_json = response
     print(response.text)
     
 
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
-def generate_response(tasks, busy_times, lower_bound, upper_bound):
+def generate_response(tasks, busy_times):
     if busy_times == None or tasks == None:
         return
     
@@ -442,8 +543,6 @@ def generate_response(tasks, busy_times, lower_bound, upper_bound):
     busy_time_list = ""
     for busy_time in busy_times:
         busy_time_list += f"dateTime start: {busy_time[0]}, dateTime end: {busy_time[1]}\n"
-
-    # print(busy_time_list)
 
     prompt = f"""You are a bot that takes information about any given task and its priority, 
     you will predict the time it will take to complete the task and list the start and end time in the a day.
@@ -458,12 +557,12 @@ def generate_response(tasks, busy_times, lower_bound, upper_bound):
     """
 
     response = gemini_client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents=prompt,
-    config={
-        'response_mime_type': 'application/json',
-        'response_schema': list[Event],
-    },
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config={
+            'response_mime_type': 'application/json',
+            'response_schema': list[Event],
+        },
     )
     return response
 
@@ -478,13 +577,6 @@ def year():
 
 # Entry point for the application
 if __name__ == "__main__":
-    # schedule_tasks(generate_response(get_tasks(), get_busy_times()))
-    task_list = [["Give yash head", "5"], ["Recieve glorious head", "1"], ["Get a refund on shit head", "3"]]
-    lower_bound = "T07:00:00"
-    upper_bound = "T21:00:00"
-
-    schedule_tasks(generate_response(task_list, get_busy_times(), lower_bound, upper_bound))
-
     # Create the application
     app = QtWidgets.QApplication(sys.argv)
     
