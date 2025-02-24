@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google import genai
@@ -16,6 +17,9 @@ LIGHT_MODE_KEY = "light_mode"
 GEMINI_KEY = "gemini_key"
 GOOGLE_AUTH = "google_auth"
 NOTION_TOKEN = "notion_token"
+
+
+#todo plan ahead using yash's issues in advance. for example even if i dont want to implement something now, give it a placeholder value
 
 # "https://www.notion.so/Ultimate-Tasks-Manager-bfbf17347efa413c9ea5ec315b28145a?pvs=4"
 
@@ -324,35 +328,44 @@ def get_tasks():
 # currently just prints out the upcoming events in the next week and the calendars that are available
 def get_busy_times():
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
+    run = True
+    while run == True:
+        try:
+            creds = None
+            if os.path.exists("token.json"):
+                creds = Credentials.from_authorized_user_file("token.json")
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
 
-    creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json")
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+                    print("string: " + settings.value(GOOGLE_AUTH, "", type=str))
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        settings.value(GOOGLE_AUTH, "", type=str), SCOPES
+                    )
+                    creds = flow.run_local_server(port=0)
+                with open("token.json", "w") as token:
+                    token.write(creds.to_json())
+            run = False
+        except RefreshError as error:
+            os.remove("token.json")
+            print("Refresh error, token.json removed")
 
-            print("string: " + settings.value(GOOGLE_AUTH, "", type=str))
-            flow = InstalledAppFlow.from_client_secrets_file(
-                settings.value(GOOGLE_AUTH, "", type=str), SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
 
     try:
         service = build("calendar", "v3", credentials=creds)
-        
-        now = datetime.now().isoformat() + "-05:00" #* EST
         # print(now)
         # print("Getting upcoming events in the next week")
+        
+        now = datetime.now().isoformat() + "-05:00" # EST #ToDo add capability for user to choose timezone
+        timeMax = (datetime.now() + timedelta(days=7)).isoformat() + "-05:00"
+
         events_result = (
             service.events()
             .list(
                 calendarId="primary",
                 timeMin=now,
-                timeMax=f"{year()}-{month()}-{day()+7}T23:59:59Z",
+                timeMax=timeMax,
                 singleEvents=True,
                 orderBy="startTime",
             )
@@ -408,15 +421,20 @@ def get_busy_times():
         #     start = event["start"].get("dateTime", event["start"].get("date"))
         #     print(start, event["summary"])
     except HttpError as error:
-        print(f"An error occurred: {error}")
+        print(f"HttpError error occurred: {error}")
 
 def schedule_tasks(response):
+    if response == None:
+        return
     tasks_json = response
     print(response.text)
     
 
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
-def generate_response(tasks, busy_times):
+def generate_response(tasks, busy_times, lower_bound, upper_bound):
+    if busy_times == None or tasks == None:
+        return
+    
     task_list = ""
     for task in tasks:
         task_list += f"{task[0]}, Priority: {task[1]}\n"
@@ -460,8 +478,12 @@ def year():
 
 # Entry point for the application
 if __name__ == "__main__":
-    schedule_tasks(generate_response(get_tasks(), get_busy_times()))
+    # schedule_tasks(generate_response(get_tasks(), get_busy_times()))
+    task_list = [["Give yash head", "5"], ["Recieve glorious head", "1"], ["Get a refund on shit head", "3"]]
+    lower_bound = "T07:00:00"
+    upper_bound = "T21:00:00"
 
+    schedule_tasks(generate_response(task_list, get_busy_times(), lower_bound, upper_bound))
 
     # Create the application
     app = QtWidgets.QApplication(sys.argv)
