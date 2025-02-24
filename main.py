@@ -110,16 +110,22 @@ class SettingsWindow(QtWidgets.QWidget):
         self.completer = QtWidgets.QCompleter(times)
         self.completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
 
+        self.lower_bound = QtWidgets.QHBoxLayout()
+
         self.lower_bound_label = QtWidgets.QLabel("Start Time:")
-        layout.addWidget(self.lower_bound_label)
+        self.lower_bound.addWidget(self.lower_bound_label)
 
         self.lower_bound_input.setCompleter(self.completer)
         self.lower_bound_input.editingFinished.connect(lambda: self.format_time("lower"))
 
-        layout.addWidget(self.lower_bound_input)
+        self.lower_bound.addWidget(self.lower_bound_input)
+
+        layout.addLayout(self.lower_bound)
+
+        self.upper_bound = QtWidgets.QHBoxLayout()
 
         self.upper_bound_label = QtWidgets.QLabel("End Time:")
-        layout.addWidget(self.upper_bound_label)
+        self.upper_bound.addWidget(self.upper_bound_label)
 
         self.upper_bound_input = QtWidgets.QLineEdit()
         self.upper_bound_input.setText(self.upper_default_time)
@@ -127,7 +133,9 @@ class SettingsWindow(QtWidgets.QWidget):
         self.upper_bound_input.setCompleter(self.completer)
         self.upper_bound_input.editingFinished.connect(lambda: self.format_time("upper"))
 
-        layout.addWidget(self.upper_bound_input)
+        self.upper_bound.addWidget(self.upper_bound_input)
+
+        layout.addLayout(self.upper_bound)
 
         self.gemini_label = QtWidgets.QLabel("Gemini API Key:")
         layout.addWidget(self.gemini_label)
