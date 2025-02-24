@@ -354,7 +354,8 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         print("Regenerating Week...")
     
     def test(self):
-        schedule_tasks(generate_response(get_tasks(), get_busy_times()))
+        # schedule_tasks(generate_response(get_tasks(), get_busy_times()))
+        checkAITaskCalendar()
 
 # Main window class
 class MainWindow(QtWidgets.QMainWindow):
@@ -479,8 +480,7 @@ def get_tasks():
     print(tasks)
     return tasks
 
-# currently just prints out the upcoming events in the next week and the calendars that are available
-def get_busy_times():
+def google_auth():
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
     run = True
     while run == True:
@@ -504,6 +504,11 @@ def get_busy_times():
         except RefreshError as error:
             os.remove("token.json")
             print("Refresh error, token.json removed")
+    return creds
+
+# currently just prints out the upcoming events in the next week and the calendars that are available
+def get_busy_times():
+    creds = google_auth()
 
     try:
         service = build("calendar", "v3", credentials=creds)
@@ -586,6 +591,30 @@ def month():
 
 def year():
     return datetime.now().year
+
+# Check if the user has an AI Tasks calendar and if not, create one
+def createAICalendar():
+    creds = google_auth()
+
+    service = build("calendar", "v3", credentials=creds)
+
+    AI_Tasks = False
+
+    for calendar in service.calendarList().list().execute()['items']:
+        if calendar['summary'] == "AI Tasks":
+            AI_Tasks = True
+    
+    if AI_Tasks:
+        print("AI Tasks already exists")
+        return
+
+    calendar = {
+        "summary": "AI Tasks",
+        "timeZone": "America/New_York"
+    }
+
+    service.calendars().insert(body=calendar).execute()
+    print("Success?")
 
 # Entry point for the application
 if __name__ == "__main__":
