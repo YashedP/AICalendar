@@ -14,6 +14,8 @@ from PySide6 import QtCore, QtWidgets, QtGui
 import re
 import sys
 
+import tzlocal
+
 LIGHT_MODE_KEY = "light_mode"
 GEMINI_KEY = "gemini_key"
 GOOGLE_AUTH = "google_auth"
@@ -41,14 +43,6 @@ work_hours = settings.value("work_hours", [[time(7, 0, 0).isoformat(), time(22, 
 for hours in work_hours:
     hours[0] = time.fromisoformat(hours[0])
     hours[1] = time.fromisoformat(hours[1])
-
-# class Event(BaseModel):
-#     title: str
-#     time_to_complete: str
-#     time_start: str
-#     time_end: str
-#     day: int
-#     month: int
 
 class Event(BaseModel):
     title: str
@@ -665,7 +659,7 @@ def createAICalendar():
 
     calendar = {
         "summary": "AI Tasks",
-        "timeZone": "America/New_York"
+        "timeZone": tzlocal.get_localzone().key
     }
 
     service.calendars().insert(body=calendar).execute()
