@@ -44,6 +44,8 @@ for hours in work_hours:
     hours[0] = time.fromisoformat(hours[0])
     hours[1] = time.fromisoformat(hours[1])
 
+calendars = []
+
 class Event(BaseModel):
     title: str
     start: str
@@ -529,66 +531,67 @@ def get_free_times(days=1) -> list:
     creds = google_auth()
     
     try:
-        service = build("calendar", "v3", credentials=creds)
-
-        now = datetime.now().astimezone().isoformat()
-        
-        timeMax = (datetime.today().replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=days)).astimezone().isoformat()
-
-        events_result = (
-            service.events()
-            .list(
-                calendarId="primary",
-                timeMin=now,
-                timeMax=timeMax,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
-        )
-        events = events_result.get("items", [])
-
         free_times = copy.deepcopy(work_hours)
 
         for i in range(len(free_times)):
             free_times[i] = [[free_times[i][0], free_times[i][1]]]
-        
-        # Going through each event and seeing if it within the interval, then if it is then break the interval down into 2 intervals
-        for event in events:
-            start = datetime.fromisoformat(event["start"].get("dateTime", event["start"].get("date")))
-            end = datetime.fromisoformat(event["end"].get("dateTime", event["end"].get("date")))
 
-            i = start.weekday()
+        for calendar in calendars:
+            service = build("calendar", "v3", credentials=creds)
 
-            free_time = free_times[i]
-            for (i, interval) in enumerate(free_time):
-                # 1. Event ends before interval
-                if end.time() <= interval[0]:
-                    continue
+            now = datetime.now().astimezone().isoformat()
+            
+            timeMax = (datetime.today().replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=days)).astimezone().isoformat()
 
-                # 2. Event starts after interval
-                elif start.time() >= interval[1]:
-                    continue
+            events_result = (
+                service.events()
+                .list(
+                    calendarId=calendar,
+                    timeMin=now,
+                    timeMax=timeMax,
+                    singleEvents=True,
+                    orderBy="startTime",
+                )
+                .execute()
+            )
+            events = events_result.get("items", [])
 
-                # 3. Event starts before interval and ends in the middle of the interval
-                elif start.time() < interval[0] and end.time() <= interval[1]:
-                    interval[1] = time(end.hour, end.minute, 0)
-                    break
-                
-                # 4. Event starts in the middle of the interval and ends after the interval
-                elif start.time() < interval[1] and end.time() >= interval[1]:
-                    interval[0] = time(start.hour, start.minute, 0)
-                    break
-                
-                # 5. Event starts in the middle of the interval and ends in the middle of the interval
-                elif start.time() > interval[0] and end.time() < interval[1]:
-                    new_interval = [time(end.hour, end.minute, 0), interval[1]]
-                    interval[1] = time(start.hour, start.minute, 0)
-                    free_time.insert(i + 1, new_interval)
-                
-                # 6. Event overlaps the entire interval
-                else:
-                    free_time.pop(i)
+            # Going through each event and seeing if it within the interval, then if it is then break the interval down into 2 intervals
+            for event in events:
+                start = datetime.fromisoformat(event["start"].get("dateTime", event["start"].get("date")))
+                end = datetime.fromisoformat(event["end"].get("dateTime", event["end"].get("date")))
+
+                i = start.weekday()
+
+                free_time = free_times[i]
+                for (i, interval) in enumerate(free_time):
+                    # 1. Event ends before interval
+                    if end.time() <= interval[0]:
+                        continue
+
+                    # 2. Event starts after interval
+                    elif start.time() >= interval[1]:
+                        continue
+
+                    # 3. Event starts before interval and ends in the middle of the interval
+                    elif start.time() < interval[0] and end.time() <= interval[1]:
+                        interval[1] = time(end.hour, end.minute, 0)
+                        break
+                    
+                    # 4. Event starts in the middle of the interval and ends after the interval
+                    elif start.time() < interval[1] and end.time() >= interval[1]:
+                        interval[0] = time(start.hour, start.minute, 0)
+                        break
+                    
+                    # 5. Event starts in the middle of the interval and ends in the middle of the interval
+                    elif start.time() > interval[0] and end.time() < interval[1]:
+                        new_interval = [time(end.hour, end.minute, 0), interval[1]]
+                        interval[1] = time(start.hour, start.minute, 0)
+                        free_time.insert(i + 1, new_interval)
+                    
+                    # 6. Event overlaps the entire interval
+                    else:
+                        free_time.pop(i)
                 
 
         return free_times
@@ -643,6 +646,8 @@ def generate_response(tasks, busy_times) -> Event:
 
 # Check if the user has an AI Tasks calendar and if not, create one
 def createAICalendar():
+    global calendars
+
     creds = google_auth()
 
     service = build("calendar", "v3", credentials=creds)
@@ -650,9 +655,12 @@ def createAICalendar():
     AI_Tasks = False
 
     for calendar in service.calendarList().list().execute()['items']:
-        if calendar['summary'] == "AI Tasks":
+        if calendar["summary"] == "AI Tasks":
             AI_Tasks = True
-    
+        else:
+            calendars.append(calendar["id"])
+        
+
     if AI_Tasks:
         print("AI Tasks already exists")
         return
