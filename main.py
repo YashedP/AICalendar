@@ -1,5 +1,5 @@
 import copy
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -35,6 +35,12 @@ if settings.value(NOTION_TOKEN, "", type=str):
     notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
 else:
     notion_client = None
+
+work_hours = settings.value("work_hours", [[time(7, 0, 0).isoformat(), time(22, 0, 0).isoformat()]] * 7, type=list)
+
+for hours in work_hours:
+    hours[0] = time.fromisoformat(hours[0])
+    hours[1] = time.fromisoformat(hours[1])
 
 # class Event(BaseModel):
 #     title: str
@@ -88,11 +94,12 @@ class SettingsWindow(QtWidgets.QWidget):
         
         self.gemini_key_input = PlainTextEdit(self)
         
-        self.times = settings.value("work_hours", [["T07:00:00", "T22:00:00"]] * 7, type=list)
+        self.times = copy.deepcopy(work_hours)
 
         for i in range(len(self.times)):
-            self.times[i][0] = datetime.strptime(self.times[i][0][1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
-            self.times[i][1] = datetime.strptime(self.times[i][1][1:], "%H:%M:%S").strftime("%I:%M %p").lstrip("0")
+            self.times[i][0] = self.times[i][0].strftime("%I:%M %p").lstrip("0")
+            self.times[i][1] = self.times[i][1].strftime("%I:%M %p").lstrip("0")
+            print(self.times[i][0])
 
         self.prev_time = copy.deepcopy(self.times)
 
@@ -264,18 +271,15 @@ class SettingsWindow(QtWidgets.QWidget):
         """Apply the selected settings."""
         times = []
         for i in range(len(self.days)):
-            lower_time_obj = datetime.strptime(self.grid_time_layout.itemAtPosition(i + 1, 1).widget().text(), "%I:%M %p")
-            upper_time_obj = datetime.strptime(self.grid_time_layout.itemAtPosition(i + 1, 2).widget().text(), "%I:%M %p")
-
-            lower = "T" + lower_time_obj.strftime("%H:%M:%S")
-            upper = "T" + upper_time_obj.strftime("%H:%M:%S")
+            lower = time.strftime(self.grid_time_layout.itemAtPosition(i + 1, 1).widget().text(), "%I:%M %p")
+            upper = time.strftime(self.grid_time_layout.itemAtPosition(i + 1, 2).widget().text(), "%I:%M %p")
 
             # Checks if the upper time is before the lower time
-            if upper_time_obj < lower_time_obj:
+            if upper < lower:
                 QtWidgets.QMessageBox.critical(self, "Error", "You cannot have the end time occur before the start time!", QtWidgets.QMessageBox.Ok)
                 return
 
-            times += [[lower, upper]]
+            times += [[lower.isoformat(), upper.isoformat()]]
 
         if self.light_mode_radio.isChecked():
             self.setStyleSheet("")  # Light mode (default)
@@ -288,6 +292,7 @@ class SettingsWindow(QtWidgets.QWidget):
             settings.setValue(LIGHT_MODE_KEY, False)  # Save preference
 
         settings.setValue("work_hours", times)
+        work_hours = times
 
         if self.gemini_key_input:
             settings.setValue(GEMINI_KEY, self.gemini_key_input.toPlainText())
@@ -365,9 +370,13 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         print("Regenerating Week...")
     
     def test(self):
-        # schedule_tasks(generate_response(get_tasks(), get_busy_times()))
+        # schedule_tasks(generate_response(get_tasks(), get_free_times()))
+        
         createAICalendar()
-    
+
+        for interval in get_free_times()[datetime.today().weekday()]:
+            print(f"Start: {interval[0].isoformat()}, end: {interval[1].isoformat()}")
+        
     def resetSettings(self):
         settings.clear()
 
@@ -414,7 +423,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # Retrieve tasks from the database and schedule them
     def fetch_and_schedule(self):
         print("Tasks fetched and scheduled!")
-        
+
 # Apply the initial theme based on the light mode preference, referenced by all windows
 def apply_initial_theme(QWindow, light_mode):
     """Apply the initial theme based on the light mode preference."""
@@ -423,29 +432,29 @@ def apply_initial_theme(QWindow, light_mode):
         QWindow.setStyleSheet(dark_style)  # Dark mode for settings window
 
 # Update the API key for Gemini
-def update_gemini_api_key():
+def update_gemini_api_key() -> None:
+    global gemini_client
     gemini_key = settings.value(GEMINI_KEY, "", type=str)
     if gemini_key:
         gemini_client = genai.Client(api_key=gemini_key)
     else:
         gemini_client = None
 
-
 # Update the API key for Notion
-def notion_key():
+def notion_key() -> None:
     notion_key = settings.value(GEMINI_KEY, "", type=str)
     if notion_key:
         notion_client = NotionClient(auth=settings.value(NOTION_TOKEN, "", type=str))
     else:
         notion_client = None
 
-def resource_path(relative_path):
+def resource_path(relative_path) -> str:
     """Get the absolute path to the resource, works for development and PyInstaller builds."""
     if getattr(sys, '_MEIPASS', None): # Check if running from PyInstaller
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.abspath(relative_path)
 
-def get_tasks():
+def get_tasks() -> list:
     # Get all tasks that are not done and are schedulable
     database_id = "6728f8a2330a4092860d6d358a4c33f3"
 
@@ -491,7 +500,6 @@ def get_tasks():
     # Sort tasks by priority in descending order
     tasks.sort(key=lambda x: x[1], reverse=True)
 
-    print(tasks)
     return tasks
 
 def google_auth():
@@ -520,15 +528,18 @@ def google_auth():
             print("Refresh error, token.json removed")
     return creds
 
-# currently just prints out the upcoming events in the next week and the calendars that are available
-def get_busy_times():
-    creds = google_auth()
+# Currently just prints out the upcoming events in the next week and the calendars that are available
+def get_free_times(days=1) -> list:
+    days -= 1
 
+    creds = google_auth()
+    
     try:
         service = build("calendar", "v3", credentials=creds)
 
-        now = datetime.now().isoformat() + "-05:00"
-        timeMax = (datetime.now() + timedelta(days=7)).isoformat() + "-05:00"
+        now = datetime.now().astimezone().isoformat()
+        
+        timeMax = (datetime.today().replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=days)).astimezone().isoformat()
 
         events_result = (
             service.events()
@@ -543,14 +554,50 @@ def get_busy_times():
         )
         events = events_result.get("items", [])
 
-        busy_times = []
+        free_times = copy.deepcopy(work_hours)
+
+        for i in range(len(free_times)):
+            free_times[i] = [[free_times[i][0], free_times[i][1]]]
+        
+        # Going through each event and seeing if it within the interval, then if it is then break the interval down into 2 intervals
         for event in events:
-            start = event["start"].get("dateTime", event["start"].get("date"))
-            end = event["end"].get("dateTime", event["end"].get("date"))
+            start = datetime.fromisoformat(event["start"].get("dateTime", event["start"].get("date")))
+            end = datetime.fromisoformat(event["end"].get("dateTime", event["end"].get("date")))
 
-            busy_times.append([start, end])
+            i = start.weekday()
 
-        return busy_times
+            free_time = free_times[i]
+            for (i, interval) in enumerate(free_time):
+                # 1. Event ends before interval
+                if end.time() <= interval[0]:
+                    continue
+
+                # 2. Event starts after interval
+                elif start.time() >= interval[1]:
+                    continue
+
+                # 3. Event starts before interval and ends in the middle of the interval
+                elif start.time() < interval[0] and end.time() <= interval[1]:
+                    interval[1] = time(end.hour, end.minute, 0)
+                    break
+                
+                # 4. Event starts in the middle of the interval and ends after the interval
+                elif start.time() < interval[1] and end.time() >= interval[1]:
+                    interval[0] = time(start.hour, start.minute, 0)
+                    break
+                
+                # 5. Event starts in the middle of the interval and ends in the middle of the interval
+                elif start.time() > interval[0] and end.time() < interval[1]:
+                    new_interval = [time(end.hour, end.minute, 0), interval[1]]
+                    interval[1] = time(start.hour, start.minute, 0)
+                    free_time.insert(i + 1, new_interval)
+                
+                # 6. Event overlaps the entire interval
+                else:
+                    free_time.pop(i)
+                
+
+        return free_times
     except HttpError as error:
         print(f"HttpError error occurred: {error}")
 
@@ -561,9 +608,8 @@ def schedule_tasks(response):
     tasks_json = response
     print(response.text)
     
-
 # takes in a list of lists containing the task and its priority and generates a response using Gemini
-def generate_response(tasks, busy_times):
+def generate_response(tasks, busy_times) -> Event:
     if busy_times == None or tasks == None:
         return
     
@@ -575,9 +621,13 @@ def generate_response(tasks, busy_times):
     for busy_time in busy_times:
         busy_time_list += f"dateTime start: {busy_time[0]}, dateTime end: {busy_time[1]}\n"
 
+    day = datetime.now().day
+    month = datetime.now().month
+    year = datetime.now().year
+
     prompt = f"""You are a bot that takes information about any given task and its priority, 
     you will predict the time it will take to complete the task and list the start and end time in the a day.
-    The current date is {month()}/{day()}/{year()}.
+    The current date is {month}/{day}/{year}.
     Here are your list of tasks to schedule:
 
     {task_list}
@@ -596,15 +646,6 @@ def generate_response(tasks, busy_times):
         },
     )
     return response
-
-def day():
-    return datetime.now().day
-
-def month():
-    return datetime.now().month
-
-def year():
-    return datetime.now().year
 
 # Check if the user has an AI Tasks calendar and if not, create one
 def createAICalendar():
@@ -628,7 +669,6 @@ def createAICalendar():
     }
 
     service.calendars().insert(body=calendar).execute()
-    print("Success?")
 
 # Entry point for the application
 if __name__ == "__main__":
