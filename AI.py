@@ -12,9 +12,6 @@ from notion_client import errors
 from pydantic import BaseModel
 from tzlocal import get_localzone
 
-from openai import OpenAI
-import json
-
 import config
 
 class Event(BaseModel):
@@ -183,7 +180,6 @@ def find_open_time(days: int) -> list[list[time, time]]:
             for intervals in free_times[i]:
                 intervals[0] = datetime.combine(datetime.today() + timedelta(days=day), intervals[0])
                 intervals[1] = datetime.combine(datetime.today() + timedelta(days=day), intervals[1])
-            
                 
         return free_times
     except HttpError as error:
@@ -254,7 +250,6 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
     {free_time_list}
     """
 
-    print(task_list)
     response = config.gemini_client.models.generate_content(
         model="gemini-2.0-flash",
         contents=gemini_prompt,
@@ -263,6 +258,9 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
             'response_schema': list[Event],
         },
     ).parsed
+    
+    # from openai import OpenAI
+    # import json
     
     # client = OpenAI(api_key=client.settings.value(config.GEMINI_KEY, "", type=str))
     
@@ -277,16 +275,27 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
     
     # response = response.choices[0].message.parsed.events
     
-    for i in range(len(response)):
-        start = datetime.fromisoformat(response[i].start)
-        end = datetime.fromisoformat(response[i].end)
+    # for i in range(len(response)):
+    #     start = datetime.fromisoformat(response[i].start)
+    #     end = datetime.fromisoformat(response[i].end)
         
-        print(f"Task {response[i].title}: {start.hour}:{start.minute:02} to {end.hour}:{end.minute:02}")
+    #     print(f"Task {response[i].title}: {start.hour}:{start.minute:02} to {end.hour}:{end.minute:02}")
     
     return response
 
 # Schedule the AI Tasks events on the AI Tasks Calendar
-def schedule_tasks_on_calendar(events: list[list[datetime, datetime]]):
+def schedule_tasks_on_calendar(events: list[Event]):
+    for event in events:
+        creds = google_auth()
+        service = build("calendar", "v3", credentials=creds)
+        
+        event = {
+            "summary": event.title,
+            "start": {"dateTime": event.start, "timeZone": get_localzone().key},
+            "end": {"dateTime": event.end, "timeZone": get_localzone().key},
+        }
+
+        service.events().insert(calendarId=config.ai_calendar, body=event).execute()
     pass
 
 def google_auth():
@@ -331,6 +340,7 @@ def check_AI_tasks_calendar():
     for calendar in service.calendarList().list().execute()['items']:
         if calendar["summary"] == "AI Tasks":
             AI_Tasks = True
+            config.ai_calendar = calendar["id"]
         else:
             config.calendars.append(calendar["id"])
         

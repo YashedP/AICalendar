@@ -35,10 +35,6 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         test = menu.addAction("Test")
         test.triggered.connect(self.test)
 
-        # Add "Reset Settings" option
-        resetSettings = menu.addAction("Reset Settings")
-        resetSettings.triggered.connect(self.resetSettings)
-
         # Add "Exit" option
         exit_action = menu.addAction("Exit")
         exit_action.triggered.connect(self.exit_app)
@@ -68,11 +64,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
     
     @QtCore.Slot()
     def test(self):        
-        AI.auto_schedule_tasks(1)
-
-    @QtCore.Slot()
-    def resetSettings(self):
-        config.settings.clear()
+        pass
 
     # Exit the application upon clicking "Exit"
     @QtCore.Slot()
