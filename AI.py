@@ -118,6 +118,23 @@ def find_open_time(days: int) -> list[list[time, time]]:
             )
             events = events_result.get("items", [])
 
+            # Start from the time it is now
+            intervals = free_times[datetime.today().weekday()]
+            interval = intervals[0]
+            now = time(datetime.now().hour, datetime.now().minute, 0)
+            
+            now = time(10, 3, 0) # For testing purposes
+            if interval[1] < now:
+                intervals.remove(interval)    
+            elif interval[0] < now:
+                if now.minute > 45:
+                    interval[0] = time(now.hour + 1, 0, 0)
+                else:
+                    for n in [15, 30, 45]:
+                        if now.minute < n:
+                            interval[0] = time(now.hour, n, 0)
+                            break
+
             # Going through each event and seeing if it within the interval, then if it is then break the interval down into 2 intervals
             for event in events:
                 start = datetime.fromisoformat(event["start"].get("dateTime", event["start"].get("date")))
@@ -155,7 +172,7 @@ def find_open_time(days: int) -> list[list[time, time]]:
                     else:
                         free_time.pop(i)
                 
-
+                
         return free_times
     except HttpError as error:
         print(f"HttpError error occurred: {error}")

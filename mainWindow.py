@@ -48,3 +48,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot()
     def fetch_and_schedule(self):
         print("Tasks fetched and scheduled!")
+
+    def closeEvent(self, event):
+        event.ignore()  # Ignore the close event to prevent closing the window
+        self.hide()  # Hide the window instead
