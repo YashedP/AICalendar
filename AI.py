@@ -12,6 +12,9 @@ from notion_client import errors
 from pydantic import BaseModel
 from tzlocal import get_localzone
 
+from openai import OpenAI
+import json
+
 import config
 
 class Event(BaseModel):
@@ -19,13 +22,17 @@ class Event(BaseModel):
     start: str
     end: str
 
+class Events(BaseModel):
+    events: list[Event]
+
 # From the tasks, create the events on the AI Tasks Calendar
-def auto_schedule_tasks(days=1):
+def auto_schedule_tasks(days=2):
     check_AI_tasks_calendar()
     parse_passed_tasks()
     tasks = get_tasks()
     intervals = find_open_time(days)
-    ai_tasks = find_task_times(tasks, intervals)
+    ai_tasks = find_task_times(days, tasks, intervals)
+    
     schedule_tasks_on_calendar(ai_tasks)
 
 # Check all the tasks that have finished and ask the user if they're finished
@@ -123,7 +130,6 @@ def find_open_time(days: int) -> list[list[time, time]]:
             interval = intervals[0]
             now = time(datetime.now().hour, datetime.now().minute, 0)
             
-            now = time(10, 3, 0) # For testing purposes
             if interval[1] < now:
                 intervals.remove(interval)    
             elif interval[0] < now:
@@ -172,13 +178,19 @@ def find_open_time(days: int) -> list[list[time, time]]:
                     else:
                         free_time.pop(i)
                 
+        for day in range(len(free_times)):
+            i = (day + datetime.now().weekday()) % len(free_times)
+            for intervals in free_times[i]:
+                intervals[0] = datetime.combine(datetime.today() + timedelta(days=day), intervals[0])
+                intervals[1] = datetime.combine(datetime.today() + timedelta(days=day), intervals[1])
+            
                 
         return free_times
     except HttpError as error:
         print(f"HttpError error occurred: {error}")
 
 # Get the times that is going to be occupied from the AI model
-def find_task_times(tasks: list[list[str, str]], free_times: list[list[time, time]]) -> list[list[datetime, datetime]]:
+def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[list[time, time]]) -> list[Event]:
     if free_times == None or tasks == None:
         return
 
@@ -187,32 +199,91 @@ def find_task_times(tasks: list[list[str, str]], free_times: list[list[time, tim
         task_list += f"{task[0]}, Priority: {task[1]}\n"
 
     free_time_list = ""
-    for interval in free_times[datetime.today().weekday()]:
-        free_time_list += f"dateTime start: {interval[0].isoformat()}, dateTime end: {interval[1].isoformat()}"
+    for day in range(days):
+        i = (day + datetime.today().weekday()) % len(free_times)
+        
+        free_time_list += f"Day {day + 1}:\n"
+        for interval in free_times[i]:
+            free_time_list += f"dateTime start: {interval[0].isoformat()}, dateTime end: {interval[1].isoformat()}\n"
+        free_time_list += "\n"
+    
+    # prompt = f"""
+    # You are a personal assistant that takes information about any given task and its priority, 
+    # you will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
+    # The minimum length of a scheduled task is 15 minutes.
+    
+    # Here are your list of tasks to schedule:
 
-    prompt = f"""You are a bot that takes information about any given task and its priority, 
-    you will predict the time it will take to complete the task and list the start and end time in the a day.
-    Return in ISO Standard
-    Here are your list of tasks to schedule:
+    # {task_list}
 
+    # Here are times the user is free, you should scheduling tasks during these times:
+
+    # {free_time_list}
+    # """
+
+    gemini_prompt =  f"""
+    You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
+    You will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
+    The minimum length of a scheduled task is 15 minutes.
+    
+    You will be provided with the list of tasks to schedule and the times the user is free in ISO format.
+    
+    Tasks to schedule:
     {task_list}
-
-    Here are times the user is free, you should scheduling tasks during these times:
-
+    
+    Intervals of time the user is free:
     {free_time_list}
     """
 
+    system_prompt = f"""
+    You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
+    You will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
+    
+    Minimum length of a scheduled task is 15 minutes.
+    You are allowed to put multiple tasks in the same time slot if they are small enough.
+    
+    You will be provided with the list of tasks to schedule and the times the user is free in ISO format.
+    """
+
+    prompt = f"""
+    Tasks to schedule:
+    {task_list}
+
+
+    Intervals of time the user is free:
+    {free_time_list}
+    """
+
+    print(task_list)
     response = config.gemini_client.models.generate_content(
         model="gemini-2.0-flash",
-        contents=prompt,
+        contents=gemini_prompt,
         config={
             'response_mime_type': 'application/json',
             'response_schema': list[Event],
         },
-    )
+    ).parsed
     
-    print(response)
-    return None
+    # client = OpenAI(api_key=client.settings.value(config.GEMINI_KEY, "", type=str))
+    
+    # response = client.beta.chat.completions.parse(
+    #     model="gpt-4o-mini-2024-07-18",
+    #     messages=[
+    #         {"role": "system", "content": system_prompt},
+    #         {"role": "user", "content": prompt}
+    #     ],
+    #     response_format=Events,
+    # )
+    
+    # response = response.choices[0].message.parsed.events
+    
+    for i in range(len(response)):
+        start = datetime.fromisoformat(response[i].start)
+        end = datetime.fromisoformat(response[i].end)
+        
+        print(f"Task {response[i].title}: {start.hour}:{start.minute:02} to {end.hour}:{end.minute:02}")
+    
+    return response
 
 # Schedule the AI Tasks events on the AI Tasks Calendar
 def schedule_tasks_on_calendar(events: list[list[datetime, datetime]]):
@@ -221,23 +292,28 @@ def schedule_tasks_on_calendar(events: list[list[datetime, datetime]]):
 def google_auth():
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
     run = True
+    
     while run == True:
         try:
             creds = None
+    
             if os.path.exists("token.json"):
                 creds = Credentials.from_authorized_user_file("token.json")
+    
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                 else:
-
                     print("string: " + config.settings.value(config.GOOGLE_AUTH, "", type=str))
+
                     flow = InstalledAppFlow.from_client_secrets_file(
                         config.settings.value(config.GOOGLE_AUTH, "", type=str), SCOPES
                     )
+
                     creds = flow.run_local_server(port=0)
                 with open("token.json", "w") as token:
                     token.write(creds.to_json())
+
             run = False
         except RefreshError as error:
             os.remove("token.json")
@@ -260,7 +336,6 @@ def check_AI_tasks_calendar():
         
 
     if AI_Tasks:
-        print("AI Tasks already exists")
         return
 
     calendar = {
