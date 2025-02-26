@@ -1,8 +1,9 @@
-from PySide6 import QtCore, QtWidgets, QtGui
 import sys
 
-from utils import resource_path
+from PySide6 import QtGui, QtWidgets
+
 from trayApp import TrayApp
+from utils import resource_path
 
 # Entry point for the application
 if __name__ == "__main__":

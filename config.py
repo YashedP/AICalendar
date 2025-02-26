@@ -1,7 +1,8 @@
 from datetime import time
+
 from google import genai
-from PySide6 import QtCore
 from notion_client import Client as NotionClient
+from PySide6 import QtCore
 
 LIGHT_MODE_KEY = "light_mode"
 GEMINI_KEY = "gemini_key"

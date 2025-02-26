@@ -1,6 +1,7 @@
+from PySide6 import QtCore, QtWidgets
+
 import config
 import utils
-from PySide6 import QtWidgets, QtCore
 from settingsWindow import SettingsWindow
 
 # Main window class

@@ -1,5 +1,6 @@
 import os
 import sys
+
 from google import genai
 from notion_client import Client as notion_client
 

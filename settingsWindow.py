@@ -1,7 +1,8 @@
 import copy
 import re
-from PySide6 import QtCore, QtWidgets
 from datetime import datetime, time
+
+from PySide6 import QtCore, QtWidgets
 
 import config
 import utils

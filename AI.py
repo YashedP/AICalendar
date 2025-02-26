@@ -1,18 +1,18 @@
 import copy
-from datetime import datetime, time, timedelta
 import os
+from datetime import datetime, time, timedelta
+
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from notion_client import errors
 from pydantic import BaseModel
 from tzlocal import get_localzone
+
 import config
-
-from notion_client import errors
-
-from googleapiclient.errors import HttpError
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.exceptions import RefreshError
 
 class Event(BaseModel):
     title: str
