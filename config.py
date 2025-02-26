@@ -39,3 +39,5 @@ database_id = "6728f8a2330a4092860d6d358a4c33f3"
 calendars = []
 
 ai_calendar = ""
+
+debug = True

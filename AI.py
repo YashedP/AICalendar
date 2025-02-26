@@ -102,12 +102,11 @@ def find_open_time(days: int) -> list[list[time, time]]:
         for i in range(len(free_times)):
             free_times[i] = [[free_times[i][0], free_times[i][1]]]
         
+        now = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0).astimezone().isoformat()
+        timeMax = (datetime.today().replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=days)).astimezone().isoformat()            
+
         for calendar in config.calendars:
             service = build("calendar", "v3", credentials=creds)
-
-            now = datetime.now().astimezone().isoformat()
-            
-            timeMax = (datetime.today().replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=days)).astimezone().isoformat()
 
             events_result = (
                 service.events()
@@ -125,17 +124,17 @@ def find_open_time(days: int) -> list[list[time, time]]:
             # Start from the time it is now
             intervals = free_times[datetime.today().weekday()]
             interval = intervals[0]
-            now = time(datetime.now().hour, datetime.now().minute, 0)
+            time_now = time(datetime.now().hour, datetime.now().minute, 0)
             
-            if interval[1] < now:
+            if interval[1] < time_now:
                 intervals.remove(interval)    
-            elif interval[0] < now:
-                if now.minute > 45:
-                    interval[0] = time(now.hour + 1, 0, 0)
+            elif interval[0] < time_now:
+                if time_now.minute > 45:
+                    interval[0] = time(time_now.hour + 1, 0, 0)
                 else:
                     for n in [15, 30, 45]:
-                        if now.minute < n:
-                            interval[0] = time(now.hour, n, 0)
+                        if time_now.minute < n:
+                            interval[0] = time(time_now.hour, n, 0)
                             break
 
             # Going through each event and seeing if it within the interval, then if it is then break the interval down into 2 intervals
@@ -157,12 +156,12 @@ def find_open_time(days: int) -> list[list[time, time]]:
 
                     # 3. Event starts before interval and ends in the middle of the interval
                     elif start.time() < interval[0] and end.time() <= interval[1]:
-                        interval[1] = time(end.hour, end.minute, 0)
+                        interval[0] = time(end.hour, end.minute, 0)
                         break
                     
                     # 4. Event starts in the middle of the interval and ends after the interval
                     elif start.time() < interval[1] and end.time() >= interval[1]:
-                        interval[0] = time(start.hour, start.minute, 0)
+                        interval[1] = time(start.hour, start.minute, 0)
                         break
                     
                     # 5. Event starts in the middle of the interval and ends in the middle of the interval
@@ -275,11 +274,12 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
     
     # response = response.choices[0].message.parsed.events
     
-    # for i in range(len(response)):
-    #     start = datetime.fromisoformat(response[i].start)
-    #     end = datetime.fromisoformat(response[i].end)
-        
-    #     print(f"Task {response[i].title}: {start.hour}:{start.minute:02} to {end.hour}:{end.minute:02}")
+    if config.debug:
+        for i in range(len(response)):
+            start = datetime.fromisoformat(response[i].start)
+            end = datetime.fromisoformat(response[i].end)
+            
+            print(f"Task {response[i].title}: {start.hour}:{start.minute:02} to {end.hour}:{end.minute:02}")
     
     return response
 
