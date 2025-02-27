@@ -124,8 +124,13 @@ def find_open_time(days: int) -> list[list[time, time]]:
             # Start from the time it is now
             intervals = free_times[datetime.today().weekday()]
             interval = intervals[0]
-            time_now = time(datetime.now().hour, datetime.now().minute, 0)
             
+            if config.debug_time_starts_at_beginning_of_day:
+                time_now = time(0, 0, 0)
+            else:
+                time_now = time(datetime.now().hour, datetime.now().minute, 0)
+            
+            # If the interval is before the current time, remove it
             if interval[1] < time_now:
                 intervals.remove(interval)    
             elif interval[0] < time_now:
@@ -173,16 +178,49 @@ def find_open_time(days: int) -> list[list[time, time]]:
                     # 6. Event overlaps the entire interval
                     else:
                         free_time.pop(i)
-                
+
+        # Change all of the time objects to datetime objects and add the day that it is on
         for day in range(len(free_times)):
             i = (day + datetime.now().weekday()) % len(free_times)
             for intervals in free_times[i]:
                 intervals[0] = datetime.combine(datetime.today() + timedelta(days=day), intervals[0])
                 intervals[1] = datetime.combine(datetime.today() + timedelta(days=day), intervals[1])
+
+        # Remove all intervals that are less than 15 minutes
+        for day in free_times:
+            for i in range(len(day) - 1, -1, -1):
+                interval = day[i]
+                start_time = interval[0]
+                end_time = interval[1]
                 
+                travel_time = config.travel_time
+                
+                # Remove intervals that are less than 2 * the travel time that user has specified, default is 30 minutes
+                if end_time - start_time <= timedelta(minutes=travel_time*2 + 30):
+                    day.pop(i)
+                    continue
+
+        # Add travel_time for each event
+        for day in free_times:
+            for i in range(1, len(day) - 1):
+                interval = day[i]
+                
+                interval[0] = interval[0] + timedelta(minutes=travel_time)
+                interval[1] = interval[1] - timedelta(minutes=travel_time)
+        
+        # Add commute_times for each event
+        for day in free_times:
+            start_interval = day[0]
+            end_interval = day[-1]
+            
+            start_interval[1] = start_interval[1] - timedelta(minutes=config.commute_time)
+            end_interval[0] = end_interval[0] + timedelta(minutes=config.commute_time)
+        
         return free_times
     except HttpError as error:
         print(f"HttpError error occurred: {error}")
+    
+    return None
 
 # Get the times that is going to be occupied from the AI model
 def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[list[time, time]]) -> list[Event]:

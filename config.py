@@ -37,7 +37,12 @@ notion_client = create_notion_client()
 database_id = "6728f8a2330a4092860d6d358a4c33f3"
 
 calendars = []
-
 ai_calendar = ""
 
-debug = True
+# in minutes
+travel_time = 10
+commute_time = 30
+
+# DEBUG
+debug = False
+debug_time_starts_at_beginning_of_day = False
