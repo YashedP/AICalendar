@@ -11,6 +11,7 @@ GOOGLE_AUTH = "google_auth"
 NOTION_TOKEN = "notion_token"
 WORK_HOURS = "work_hours"
 USE_GEMINI = "use_gemini"
+EVENT_IDS = "event_ids"
 
 # Qt decides where to store the settings based on the OS
 settings = QtCore.QSettings("Yash", "AICalendar")
@@ -51,5 +52,5 @@ commute_time = 30
 use_gemini = settings.value(USE_GEMINI, True, type=bool)
 
 # DEBUG
-debug = True
+debug = False
 debug_time_starts_at_beginning_of_day = True

@@ -64,7 +64,8 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
     
     @QtCore.Slot()
     def test(self):        
-        AI.auto_schedule_tasks(2)
+        AI.check_AI_tasks_calendar()
+        AI.parse_passed_tasks()
 
     # Exit the application upon clicking "Exit"
     @QtCore.Slot()

@@ -61,7 +61,13 @@ def check_AI_tasks_calendar():
 # Design question: should we make the user manually mark them done on the notion database and check that?
 # Or ask the user for every task that have passed on the google calendar if it is completed or not
 def parse_passed_tasks():
-    pass
+    creds = google_auth()
+    service = build("calendar", "v3", credentials=creds)
+    
+    event_ids = config.settings.value(config.EVENT_IDS, [], type=list)
+    
+    for id in event_ids:
+        service.events().delete(calendarId=config.ai_calendar, eventId=id).execute()
 
 # Get tasks from the notion database that is schedulable
 def get_tasks() -> list[list[str]]:
@@ -371,6 +377,8 @@ def schedule_tasks_on_calendar(events: list[Event]):
     if len(events) == 0:
         print("No events to schedule")
     
+    event_id = []
+    
     for event in events:
         creds = google_auth()
         service = build("calendar", "v3", credentials=creds)
@@ -381,8 +389,10 @@ def schedule_tasks_on_calendar(events: list[Event]):
             "end": {"dateTime": event.end, "timeZone": get_localzone().key},
         }
 
-        service.events().insert(calendarId=config.ai_calendar, body=event).execute()
-    pass
+        event_id.append(service.events().insert(calendarId=config.ai_calendar, body=event).execute().get("id"))
+    
+    config.settings.setValue(config.EVENT_IDS, event_id)    
+
 
 def google_auth():
     SCOPES = ["https://www.googleapis.com/auth/calendar"]
