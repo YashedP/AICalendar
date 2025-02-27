@@ -21,7 +21,7 @@ class Event(BaseModel):
 
 class Events(BaseModel):
     events: list[Event]
-
+    
 # From the tasks, create the events on the AI Tasks Calendar
 def auto_schedule_tasks(days=2):
     check_AI_tasks_calendar()
@@ -188,17 +188,18 @@ def find_open_time(days: int) -> list[list[time, time]]:
 
         # Remove all intervals that are less than 15 minutes
         for day in free_times:
-            for i in range(len(day) - 1, -1, -1):
-                interval = day[i]
-                start_time = interval[0]
-                end_time = interval[1]
-                
-                travel_time = config.travel_time
-                
-                # Remove intervals that are less than 2 * the travel time that user has specified, default is 30 minutes
-                if end_time - start_time <= timedelta(minutes=travel_time*2 + 30):
-                    day.pop(i)
-                    continue
+            if len(day) > 2:
+                for i in range(len(day) - 1, -1, -1):
+                    interval = day[i]
+                    start_time = interval[0]
+                    end_time = interval[1]
+                    
+                    travel_time = config.travel_time
+                    
+                    # Remove intervals that are less than 2 * the travel time that user has specified, default is 30 minutes
+                    if end_time - start_time <= timedelta(minutes=travel_time*2 + 30):
+                        day.pop(i)
+                        continue
 
         # Add travel_time for each event
         for day in free_times:
@@ -210,11 +211,22 @@ def find_open_time(days: int) -> list[list[time, time]]:
         
         # Add commute_times for each event
         for day in free_times:
-            start_interval = day[0]
-            end_interval = day[-1]
-            
-            start_interval[1] = start_interval[1] - timedelta(minutes=config.commute_time)
-            end_interval[0] = end_interval[0] + timedelta(minutes=config.commute_time)
+            if len(day) > 2:
+                start_interval = day[0]
+                end_interval = day[-1]
+                
+                start_interval[1] = start_interval[1] - timedelta(minutes=config.commute_time)
+                end_interval[0] = end_interval[0] + timedelta(minutes=config.commute_time)
+        
+        # Print the free times for debugging purposes
+        if config.debug:
+            print("Free Time")
+            for day in free_times:
+                print(f"Day {day[0][0].date()}")
+                for interval in day:
+                    start = interval[0].time().isoformat()
+                    end = interval[1].time().isoformat()
+                    print(f"Free time: {start} to {end}")
         
         return free_times
     except HttpError as error:
@@ -237,7 +249,7 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
         
         free_time_list += f"Day {day + 1}:\n"
         for interval in free_times[i]:
-            free_time_list += f"dateTime start: {interval[0].isoformat()}, dateTime end: {interval[1].isoformat()}\n"
+            free_time_list += f"start time: {interval[0].isoformat()}, end time: {interval[1].isoformat()}\n"
         free_time_list += "\n"
     
     # prompt = f"""
@@ -255,37 +267,43 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
     # """
 
     gemini_prompt =  f"""
-    You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
-    You will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
-    The minimum length of a scheduled task is 15 minutes.
-    
-    You will be provided with the list of tasks to schedule and the times the user is free in ISO format.
-    
-    Tasks to schedule:
-    {task_list}
-    
-    Intervals of time the user is free:
-    {free_time_list}
+You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
+You will predict the time it will take to complete the task and list the start and end times in a day in ISO format.
+The minimum length of a scheduled task is 15 minutes.
+Do not force tasks into rigid time intervals; find the most natural placement.
+Prioritize higher-priority tasks first whenever possible.
+Estimate task duration based on complexity (e.g., reading may take 30 minutes, technical tasks longer).
+Optimize free time efficiently while keeping flexibility for unexpected interruptions.
+If putting tasks in the first and last interval of a day, prioritize closer to the start of the day.
+
+Tasks to schedule:
+{task_list}
+
+Intervals of time the user is free:
+{free_time_list}
     """
 
-    system_prompt = f"""
-    You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
-    You will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
+    if config.debug:
+        print(gemini_prompt)
+
+    # system_prompt = f"""
+    # You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
+    # You will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
     
-    Minimum length of a scheduled task is 15 minutes.
-    You are allowed to put multiple tasks in the same time slot if they are small enough.
+    # Minimum length of a scheduled task is 15 minutes.
+    # You are allowed to put multiple tasks in the same time slot if they are small enough.
     
-    You will be provided with the list of tasks to schedule and the times the user is free in ISO format.
-    """
+    # You will be provided with the list of tasks to schedule and the times the user is free in ISO format.
+    # """
 
-    prompt = f"""
-    Tasks to schedule:
-    {task_list}
+    # prompt = f"""
+    # Tasks to schedule:
+    # {task_list}
 
 
-    Intervals of time the user is free:
-    {free_time_list}
-    """
+    # Intervals of time the user is free:
+    # {free_time_list}
+    # """
 
     response = config.gemini_client.models.generate_content(
         model="gemini-2.0-flash",
@@ -323,6 +341,9 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
 
 # Schedule the AI Tasks events on the AI Tasks Calendar
 def schedule_tasks_on_calendar(events: list[Event]):
+    if len(events) == 0:
+        print("No events to schedule")
+    
     for event in events:
         creds = google_auth()
         service = build("calendar", "v3", credentials=creds)

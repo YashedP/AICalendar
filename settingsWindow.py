@@ -244,7 +244,13 @@ class SettingsWindow(QtWidgets.QWidget):
             self.main_widget.setStyleSheet(dark_style)  # Dark mode for main widget
             config.settings.setValue(config.LIGHT_MODE_KEY, False)  # Save preference
 
+        temp = times[0]
+        for i in range(len(times) - 1):
+            times[i] = times[i + 1]
+        times[-1] = temp
+
         config.settings.setValue(config.WORK_HOURS, times)
+        
         for hours in times:
             hours[0] = time.fromisoformat(hours[0])
             hours[1] = time.fromisoformat(hours[1])

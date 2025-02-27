@@ -2,7 +2,7 @@ import os
 import sys
 
 from google import genai
-from notion_client import Client as notion_client
+from notion_client import Client as NotionClient
 
 import config
 
@@ -35,6 +35,6 @@ def notion_key() -> None:
 
     notion_key = config.settings.value(config.GEMINI_KEY, "", type=str)
     if notion_key:
-        notion_client = notion_client(auth=config.settings.value(config.NOTION_TOKEN, "", type=str))
+        notion_client = NotionClient(auth=config.settings.value(config.NOTION_TOKEN, "", type=str))
     else:
         notion_client = None
