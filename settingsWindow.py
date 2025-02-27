@@ -42,9 +42,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.dark_mode_radio = QtWidgets.QRadioButton("Dark Mode")
         self.dark_mode_radio.setChecked(not light_mode)
         layout.addWidget(self.dark_mode_radio)
-        
-        self.gemini_key_input = PlainTextEdit(self)
-        
+                
         self.times = copy.deepcopy(config.work_hours)
         
         for i in range(len(self.times)):
@@ -92,17 +90,44 @@ class SettingsWindow(QtWidgets.QWidget):
             self.grid_time_layout.addWidget(upper_bound_input, i + 1, 2)
 
         layout.addLayout(self.grid_time_layout)
+        
+        self.use_gemini = config.use_gemini
+        
+        self.gemini_key = config.settings.value(config.GEMINI_KEY, "", type=str)
+        self.chatgpt_key = config.settings.value(config.CHATGPT_KEY, "", type=str)
+        
+        models_layout = QtWidgets.QHBoxLayout()
 
-        self.gemini_label = QtWidgets.QLabel("Gemini API Key:")
-        layout.addWidget(self.gemini_label)
+        if self.use_gemini:
+            model_string = "Gemini API Key:"
+            switch_string = "Switch to ChatGPT"
+        else:
+            model_string = "ChatGPT API Key:"
+            switch_string = "Switch to Gemini"
 
-        # Check if Gemini key is stored
-        if config.settings.value(config.GEMINI_KEY, "", type=str):
-            self.gemini_key_input.setPlainText(config.settings.value(config.GEMINI_KEY, "", type=str))
-        elif config.settings.value(config.GEMINI_KEY, "", type=str) == "":
-            self.gemini_key_input.setPlaceholderText("Enter Gemini key here...")
-                        
-        layout.addWidget(self.gemini_key_input)
+        self.model_label = QtWidgets.QLabel(model_string)
+        models_layout.addWidget(self.model_label)
+        
+        self.switch_model_button = QtWidgets.QPushButton(switch_string)
+        self.switch_model_button.clicked.connect(self.toggle_api)
+
+        models_layout.addWidget(self.switch_model_button)
+        layout.addLayout(models_layout)
+
+        self.model_key_input = PlainTextEdit(self)
+        
+        if self.use_gemini:
+            if self.gemini_key:
+                self.model_key_input.setPlainText(self.gemini_key)
+            else:
+                self.model_key_input.setPlaceholderText("Enter Gemini key here...")
+        else:
+            if self.chatgpt_key:
+                self.model_key_input.setPlainText(self.chatgpt_key)
+            else:
+                self.model_key_input.setPlaceholderText("Enter ChatGPT key here...")
+        
+        layout.addWidget(self.model_key_input)
 
         self.notion_label = QtWidgets.QLabel("Notion API Key:")
         layout.addWidget(self.notion_label)
@@ -257,9 +282,17 @@ class SettingsWindow(QtWidgets.QWidget):
 
         config.work_hours = times
 
-        if self.gemini_key_input:
-            config.settings.setValue(config.GEMINI_KEY, self.gemini_key_input.toPlainText())
+        if self.use_gemini:
+            self.gemini_key = self.model_key_input.toPlainText()
+        else:
+            self.chatgpt_key = self.model_key_input.toPlainText()
+        
+        if self.gemini_key:
+            config.settings.setValue(config.GEMINI_KEY, self.gemini_key)
             utils.update_gemini_api_key()
+        
+        if self.chatgpt_key:
+            config.settings.setValue(config.CHATGPT_KEY, self.chatgpt_key)
 
         if self.notion_token_input:
             config.settings.setValue(config.NOTION_TOKEN, self.notion_token_input.toPlainText())
@@ -268,5 +301,26 @@ class SettingsWindow(QtWidgets.QWidget):
         if self.google_auth_file:
             config.settings.setValue(config.GOOGLE_AUTH, self.google_auth_label.text().split(": ")[1])
         
+        config.use_gemini = self.use_gemini
+        config.settings.setValue(config.USE_GEMINI, self.use_gemini)
+        
         # Set Gemini API key
         utils.update_gemini_api_key()
+    
+    @QtCore.Slot()
+    def toggle_api(self):
+        """Switch between Gemini and ChatGPT API modes."""
+        if self.use_gemini:
+            self.gemini_key = self.model_key_input.toPlainText()
+            self.model_label.setText("ChatGPT API Key:")
+            self.switch_model_button.setText("Switch to Gemini")
+            self.model_key_input.setPlaceholderText("Enter ChatGPT API key here...")
+            self.model_key_input.setPlainText(self.chatgpt_key)
+        else:
+            self.chatgpt_key = self.model_key_input.toPlainText()
+            self.model_label.setText("Gemini API Key:")
+            self.switch_model_button.setText("Switch to ChatGPT")
+            self.model_key_input.setPlaceholderText("Enter Gemini API key here...")
+            self.model_key_input.setPlainText(self.gemini_key)
+        
+        self.use_gemini = not self.use_gemini

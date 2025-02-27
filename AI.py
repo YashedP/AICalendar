@@ -27,10 +27,35 @@ def auto_schedule_tasks(days=2):
     check_AI_tasks_calendar()
     parse_passed_tasks()
     tasks = get_tasks()
-    intervals = find_open_time(days)
-    ai_tasks = find_task_times(days, tasks, intervals)
-    
+    free_time = find_free_time(days)
+    ai_tasks = find_task_times(days, tasks, free_time)
     schedule_tasks_on_calendar(ai_tasks)
+
+# Check if the user has an AI Tasks calendar and if not, create one
+def check_AI_tasks_calendar():
+    creds = google_auth()
+
+    service = build("calendar", "v3", credentials=creds)
+
+    AI_Tasks = False
+
+    for calendar in service.calendarList().list().execute()['items']:
+        if calendar["summary"] == "AI Tasks":
+            AI_Tasks = True
+            config.ai_calendar = calendar["id"]
+        else:
+            config.calendars.append(calendar["id"])
+        
+
+    if AI_Tasks:
+        return
+
+    calendar = {
+        "summary": "AI Tasks",
+        "timeZone": get_localzone().key
+    }
+
+    service.calendars().insert(body=calendar).execute()
 
 # Check all the tasks that have finished and ask the user if they're finished
 # Design question: should we make the user manually mark them done on the notion database and check that?
@@ -39,7 +64,7 @@ def parse_passed_tasks():
     pass
 
 # Get tasks from the notion database that is schedulable
-def get_tasks() -> list[list[str, str]]:
+def get_tasks() -> list[list[str]]:
     if config.notion_client == None:
         return None
     
@@ -75,15 +100,21 @@ def get_tasks() -> list[list[str, str]]:
     for i in range(len(results)):
         title = results[i]['properties']['Title']['title'][0]['plain_text']
         priority = results[i]['properties']['Priority']['select']
+        duration = results[i]['properties']['Duration']['select']
         
         # If the user has not set a priority, set it to 0
         if priority == None:
-            priority = "0"
+            priority = "N/A"
         else:
             priority = priority['name']
         
+        if duration == None:
+            duration = "N/A"
+        else:
+            duration = duration['name']
+        
         # Append the task and its priority to the list
-        tasks.append([title, priority])
+        tasks.append([title, priority, duration])
 
     # Sort tasks by priority in descending order
     tasks.sort(key=lambda x: x[1], reverse=True)
@@ -91,7 +122,7 @@ def get_tasks() -> list[list[str, str]]:
     return tasks
 
 # Get all the free intervals for when the user is free
-def find_open_time(days: int) -> list[list[time, time]]:
+def find_free_time(days: int) -> list[list[time, time]]:
     days -= 1
     
     creds = google_auth()
@@ -135,6 +166,8 @@ def find_open_time(days: int) -> list[list[time, time]]:
                 intervals.remove(interval)    
             elif interval[0] < time_now:
                 if time_now.minute > 45:
+                    # if time_now.hour == 23:
+                    #     interval[0] = time(0, 0, 0)
                     interval[0] = time(time_now.hour + 1, 0, 0)
                 else:
                     for n in [15, 30, 45]:
@@ -240,8 +273,8 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
         return
 
     task_list = ""
-    for task in tasks:
-        task_list += f"{task[0]}, Priority: {task[1]}\n"
+    for i in range(len(tasks)):
+        task_list += f"{i}. {tasks[i][0]}, Priority: {tasks[i][1]}, Duration: {tasks[i][2]}\n"
 
     free_time_list = ""
     for day in range(days):
@@ -251,84 +284,78 @@ def find_task_times(days: int, tasks: list[list[str, str]], free_times: list[lis
         for interval in free_times[i]:
             free_time_list += f"start time: {interval[0].isoformat()}, end time: {interval[1].isoformat()}\n"
         free_time_list += "\n"
-    
-    # prompt = f"""
-    # You are a personal assistant that takes information about any given task and its priority, 
-    # you will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
-    # The minimum length of a scheduled task is 15 minutes.
-    
-    # Here are your list of tasks to schedule:
 
-    # {task_list}
+    if config.use_gemini:
+        gemini_prompt = f"""
+You are a personal assistant that schedules tasks efficiently within the user's free time.  
+Predict task durations and provide start/end times in ISO format.  
+- Min task duration: 15 min.  
+- **Prioritize high-priority tasks** if given.  
+- **Use provided durations**, otherwise estimate based on complexity.  
+- **Break large tasks** into smaller parts **if** split into different time intervals (e.g., "Task 1/2", "Task 2/2").  
+- **Do not exceed free time intervals.**  
+- **If placing tasks at the day's start/end, prefer earlier slots.**  
+- **Keep flexibility** for unexpected changes.  
 
-    # Here are times the user is free, you should scheduling tasks during these times:
+**Tasks to schedule:**  
+{task_list}  
 
-    # {free_time_list}
-    # """
-
-    gemini_prompt =  f"""
-You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
-You will predict the time it will take to complete the task and list the start and end times in a day in ISO format.
-The minimum length of a scheduled task is 15 minutes.
-Do not force tasks into rigid time intervals; find the most natural placement.
-Prioritize higher-priority tasks first whenever possible.
-Estimate task duration based on complexity (e.g., reading may take 30 minutes, technical tasks longer).
-Optimize free time efficiently while keeping flexibility for unexpected interruptions.
-If putting tasks in the first and last interval of a day, prioritize closer to the start of the day.
-
-Tasks to schedule:
-{task_list}
-
-Intervals of time the user is free:
+**User's free time slots:**  
 {free_time_list}
+        """
+
+        if config.debug:
+            print(gemini_prompt)
+
+        response = config.gemini_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=gemini_prompt,
+            config={
+                'response_mime_type': 'application/json',
+                'response_schema': list[Event],
+            },
+        ).parsed
+    
+    else:
+        from openai import OpenAI
+        
+        system_prompt = """
+You are a personal assistant that schedules tasks efficiently within the user's free time.  
+Predict task durations and provide start/end times in ISO format.  
+
+1. Predict the time each task will take and schedule them within the provided free time slots.
+3. Enforce a minimum task duration of **15 minutes.**
+4. **Prioritize high-priority tasks** when possible.
+5. Use the user-provided duration if available; otherwise, estimate based on task complexity.
+6. If a task is too large for a single interval, break it into smaller segments that fit into separate free time intervals.
+7. Do not schedule tasks outside the provided free time intervals.
+9. Optimize overall time allocation while allowing for flexibility.
     """
 
-    if config.debug:
-        print(gemini_prompt)
+        user_prompt = f"""
+Here are the tasks to schedule:  
+{task_list}  
 
-    # system_prompt = f"""
-    # You are a personal assistant that takes information about any given task and its priority, and tries to plan out the specified days in an efficient manner.
-    # You will predict the time it will take to complete the task and list the start and end time in the a day in ISO standard.
-    
-    # Minimum length of a scheduled task is 15 minutes.
-    # You are allowed to put multiple tasks in the same time slot if they are small enough.
-    
-    # You will be provided with the list of tasks to schedule and the times the user is free in ISO format.
-    # """
+Here are the user's available free time slots:  
+{free_time_list}
+        """
 
-    # prompt = f"""
-    # Tasks to schedule:
-    # {task_list}
-
-
-    # Intervals of time the user is free:
-    # {free_time_list}
-    # """
-
-    response = config.gemini_client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=gemini_prompt,
-        config={
-            'response_mime_type': 'application/json',
-            'response_schema': list[Event],
-        },
-    ).parsed
-    
-    # from openai import OpenAI
-    # import json
-    
-    # client = OpenAI(api_key=client.settings.value(config.GEMINI_KEY, "", type=str))
-    
-    # response = client.beta.chat.completions.parse(
-    #     model="gpt-4o-mini-2024-07-18",
-    #     messages=[
-    #         {"role": "system", "content": system_prompt},
-    #         {"role": "user", "content": prompt}
-    #     ],
-    #     response_format=Events,
-    # )
-    
-    # response = response.choices[0].message.parsed.events
+        if config.debug:
+            print(system_prompt)
+            print(user_prompt)
+        
+        client = OpenAI(api_key=config.settings.value(config.CHATGPT_KEY, "", type=str))
+        
+        response = client.beta.chat.completions.parse(
+            model="gpt-4o-mini-2024-07-18",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format=Events,
+        )
+        
+        response = response.choices[0].message.parsed.events
     
     if config.debug:
         for i in range(len(response)):
@@ -387,29 +414,3 @@ def google_auth():
             os.remove("token.json")
             print("Refresh error, token.json removed")
     return creds
-
-# Check if the user has an AI Tasks calendar and if not, create one
-def check_AI_tasks_calendar():
-    creds = google_auth()
-
-    service = build("calendar", "v3", credentials=creds)
-
-    AI_Tasks = False
-
-    for calendar in service.calendarList().list().execute()['items']:
-        if calendar["summary"] == "AI Tasks":
-            AI_Tasks = True
-            config.ai_calendar = calendar["id"]
-        else:
-            config.calendars.append(calendar["id"])
-        
-
-    if AI_Tasks:
-        return
-
-    calendar = {
-        "summary": "AI Tasks",
-        "timeZone": get_localzone().key
-    }
-
-    service.calendars().insert(body=calendar).execute()
