@@ -66,8 +66,11 @@ def parse_passed_tasks():
     
     event_ids = config.settings.value(config.EVENT_IDS, [], type=list)
     
-    for id in event_ids:
-        service.events().delete(calendarId=config.ai_calendar, eventId=id).execute()
+    try:
+        for id in event_ids:
+            service.events().delete(calendarId=config.ai_calendar, eventId=id).execute()
+    except Exception as e:
+        print(f"Error: {e}")
 
 # Get tasks from the notion database that is schedulable
 def get_tasks() -> list[list[str]]:
